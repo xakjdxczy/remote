@@ -134,12 +134,12 @@ function endSession(reason) {
 
 function drawFrame(buffer) {
   const view = new DataView(buffer);
-  if (view.byteLength < 9 || view.getUint8(0) !== 1) return;
+  if (view.byteLength < 13 || view.getUint8(0) !== 1) return;
   const width = view.getUint16(1);
   const height = view.getUint16(3);
   state.screenW = width;
   state.screenH = height;
-  const jpeg = buffer.slice(9);
+  const jpeg = buffer.slice(13);
   const blob = new Blob([jpeg], { type: "image/jpeg" });
   const url = URL.createObjectURL(blob);
   const img = new Image();

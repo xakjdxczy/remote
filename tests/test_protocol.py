@@ -1,3 +1,4 @@
+from remote.host.capture import now_ms
 from remote.protocol import (
     BinaryType,
     decode_json,
@@ -18,10 +19,13 @@ def test_json_roundtrip_adds_version():
 
 
 def test_frame_roundtrip():
-    payload = pack_frame(b"jpeg-bytes", 1280, 720, 12345)
+    payload = pack_frame(b"jpeg-bytes", 1280, 720, 1_786_788_000_000)
     assert peek_binary_type(payload) == BinaryType.FRAME
     width, height, ts, jpeg = unpack_frame(payload)
-    assert (width, height, ts, jpeg) == (1280, 720, 12345, b"jpeg-bytes")
+    assert (width, height, ts, jpeg) == (1280, 720, 1_786_788_000_000, b"jpeg-bytes")
+    current = now_ms()
+    packed = pack_frame(b"x", 10, 10, current)
+    assert unpack_frame(packed)[2] == current
 
 
 def test_file_chunk_roundtrip():

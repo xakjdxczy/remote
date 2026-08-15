@@ -77,6 +77,7 @@ class HostAgent:
         self.session_id: str | None = None
         self._stop = asyncio.Event()
         self._ws = None
+        self._send_lock = asyncio.Lock()
 
     async def run_forever(self) -> None:
         while not self._stop.is_set():
@@ -86,6 +87,7 @@ class HostAgent:
                 raise
             except Exception as exc:
                 logger.warning("host disconnected: %s", exc)
+            if not self._stop.is_set():
                 await asyncio.sleep(2)
 
     def stop(self) -> None:
@@ -96,9 +98,11 @@ class HostAgent:
 
         cfg = load_device_config()
         password = cfg.get("temp_password") or generate_temp_password()
+        self.session_id = None
         async with websockets.connect(self.server, max_size=8 * 1024 * 1024) as ws:
             self._ws = ws
-            await ws.send(
+            await self._send(
+                ws,
                 encode_json(
                     {
                         "type": "register",
@@ -108,7 +112,7 @@ class HostAgent:
                         "device_id": cfg.get("device_id"),
                         "temp_password": password,
                     }
-                )
+                ),
             )
             raw = await ws.recv()
             msg = decode_json(raw if isinstance(raw, str) else raw.decode())
@@ -121,25 +125,31 @@ class HostAgent:
             if self.on_registered:
                 self.on_registered(self.device_id, self.password)
 
-            consumer = asyncio.create_task(self._consume(ws))
-            producer = asyncio.create_task(self._produce(ws))
-            ping = asyncio.create_task(self._heartbeat(ws))
-            try:
-                done, pending = await asyncio.wait(
-                    {consumer, producer, ping, asyncio.create_task(self._stop.wait())},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in pending:
-                    task.cancel()
-            finally:
-                consumer.cancel()
-                producer.cancel()
-                ping.cancel()
+            tasks = [
+                asyncio.create_task(self._consume(ws), name="consume"),
+                asyncio.create_task(self._produce(ws), name="produce"),
+                asyncio.create_task(self._heartbeat(ws), name="heartbeat"),
+                asyncio.create_task(self._stop.wait(), name="stopper"),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            if self._stop.is_set():
+                return
+            for task in done:
+                exc = task.exception() if not task.cancelled() else None
+                if exc:
+                    raise exc
+            raise ConnectionError("host websocket closed")
+
+    async def _send(self, ws, data) -> None:
+        async with self._send_lock:
+            await ws.send(data)
 
     async def _heartbeat(self, ws) -> None:
         while True:
             await asyncio.sleep(15)
-            await ws.send(encode_json({"type": "ping", "t": now_ms()}))
+            await self._send(ws, encode_json({"type": "ping", "t": now_ms()}))
 
     async def _produce(self, ws) -> None:
         interval = 1 / self.fps
@@ -147,7 +157,7 @@ class HostAgent:
             if self.session_id:
                 jpeg = await asyncio.to_thread(self.source.grab_jpeg, self.quality)
                 payload = pack_frame(jpeg, self.source.width, self.source.height, now_ms())
-                await ws.send(payload)
+                await self._send(ws, payload)
             await asyncio.sleep(interval)
 
     async def _consume(self, ws) -> None:
@@ -160,7 +170,8 @@ class HostAgent:
             if kind == "session_start":
                 self.session_id = msg.get("session_id")
                 logger.info("session started by %s", msg.get("viewer_name"))
-                await ws.send(
+                await self._send(
+                    ws,
                     encode_json(
                         {
                             "type": "screen_info",
@@ -168,7 +179,7 @@ class HostAgent:
                             "height": self.source.height,
                             "backend": self.source.backend_name(),
                         }
-                    )
+                    ),
                 )
             elif kind == "session_end":
                 self.session_id = None

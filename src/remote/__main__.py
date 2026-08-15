@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
 
 def _run_server(host: str, port: int) -> None:
     import uvicorn
-    from remote.server.app import app
+    from remote.server.api import app
 
     print(f"RemoteDesk 中继已启动: http://{host}:{port}", flush=True)
     uvicorn.run(app, host=host, port=port, log_level="info")
@@ -54,7 +54,7 @@ def _run_server(host: str, port: int) -> None:
 def _run_demo(host: str, port: int, fps: int) -> None:
     import uvicorn
     from remote.host.agent import HostAgent
-    import remote.server.app as server_app
+    import remote.server.api as server_app
 
     def on_registered(device_id: str, password: str) -> None:
         server_app.demo_host = {"device_id": device_id, "password": password}

@@ -15,8 +15,8 @@ class BinaryType(IntEnum):
     FILE_CHUNK = 2
 
 
-# Binary frame: type(u8) + width(u16) + height(u16) + ts_ms(u32) + jpeg
-FRAME_HEADER = struct.Struct("!BHH I")
+# Binary frame: type(u8) + width(u16) + height(u16) + ts_ms(u64) + jpeg
+FRAME_HEADER = struct.Struct("!BHHQ")
 # Binary file chunk: type(u8) + transfer_id(u32) + offset(u64) + payload
 FILE_HEADER = struct.Struct("!BIQ")
 

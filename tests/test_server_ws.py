@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from remote.server.app import create_app
+from remote.server.api import create_app
 from remote.server.registry import Registry
-import remote.server.app as server_mod
+import remote.server.api as server_mod
 
 
 def test_health_and_config(monkeypatch):
