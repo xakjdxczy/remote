@@ -60,6 +60,9 @@ def test_register_connect_and_signal_only(monkeypatch):
 
         host.send_bytes(b"\x01" + b"frame")
         viewer.send_json({"type": "input", "event": "move", "x": 10, "y": 20})
+        rejected = viewer.receive_json()
+        assert rejected["type"] == "error"
+
         viewer.send_json({
             "type": "signal",
             "kind": "offer",
