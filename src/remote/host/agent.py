@@ -1,0 +1,229 @@
+"""Host agent: register with the relay, stream frames, apply input."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+import os
+import platform
+import sys
+from pathlib import Path
+
+from remote.host.capture import now_ms, open_frame_source
+from remote.host.files import FileInbox
+from remote.ids import format_device_id, generate_temp_password
+from remote.protocol import decode_json, encode_json, pack_frame, peek_binary_type, unpack_file_chunk, BinaryType
+
+logger = logging.getLogger("remotedesk.host")
+
+CONFIG_DIR = Path.home() / ".remotedesk"
+CONFIG_PATH = CONFIG_DIR / "device.json"
+
+
+def load_device_config() -> dict:
+    if CONFIG_PATH.exists():
+        try:
+            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def save_device_config(data: dict) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def print_banner(device_id: str, password: str, server: str, backend: str) -> None:
+    pretty = format_device_id(device_id)
+    lines = [
+        "",
+        "  ┌──────────────────────────────────────────┐",
+        "  │            RemoteDesk  被控端            │",
+        "  ├──────────────────────────────────────────┤",
+        f"  │  本机识别码   {pretty:<26}│",
+        f"  │  临时密码     {password:<26}│",
+        f"  │  中继服务器   {server:<26}│",
+        f"  │  画面来源     {backend:<26}│",
+        "  │  状态         在线                       │",
+        "  └──────────────────────────────────────────┘",
+        "  把识别码和密码发给对方，即可被远程协助。",
+        "  仅在你主动运行本程序时才会在线。",
+        "",
+    ]
+    print("\n".join(lines), flush=True)
+
+
+class HostAgent:
+    def __init__(
+        self,
+        server: str,
+        fps: int = 12,
+        quality: int = 70,
+        prefer_virtual: bool = False,
+        on_registered=None,
+    ) -> None:
+        self.server = server
+        self.fps = max(2, min(fps, 30))
+        self.quality = quality
+        self.prefer_virtual = prefer_virtual
+        self.on_registered = on_registered
+        self.source = open_frame_source(prefer_virtual=prefer_virtual)
+        self.inbox = FileInbox()
+        self.device_id: str | None = None
+        self.password: str | None = None
+        self.session_id: str | None = None
+        self._stop = asyncio.Event()
+        self._ws = None
+
+    async def run_forever(self) -> None:
+        while not self._stop.is_set():
+            try:
+                await self._run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("host disconnected: %s", exc)
+                await asyncio.sleep(2)
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    async def _run_once(self) -> None:
+        import websockets
+
+        cfg = load_device_config()
+        password = cfg.get("temp_password") or generate_temp_password()
+        async with websockets.connect(self.server, max_size=8 * 1024 * 1024) as ws:
+            self._ws = ws
+            await ws.send(
+                encode_json(
+                    {
+                        "type": "register",
+                        "role": "host",
+                        "hostname": platform.node(),
+                        "os": f"{platform.system()} {platform.release()}",
+                        "device_id": cfg.get("device_id"),
+                        "temp_password": password,
+                    }
+                )
+            )
+            raw = await ws.recv()
+            msg = decode_json(raw if isinstance(raw, str) else raw.decode())
+            if msg.get("type") != "registered":
+                raise RuntimeError(f"register failed: {msg}")
+            self.device_id = msg["device_id"]
+            self.password = msg["temp_password"]
+            save_device_config({"device_id": self.device_id, "temp_password": self.password})
+            print_banner(self.device_id, self.password, self.server, self.source.backend_name())
+            if self.on_registered:
+                self.on_registered(self.device_id, self.password)
+
+            consumer = asyncio.create_task(self._consume(ws))
+            producer = asyncio.create_task(self._produce(ws))
+            ping = asyncio.create_task(self._heartbeat(ws))
+            try:
+                done, pending = await asyncio.wait(
+                    {consumer, producer, ping, asyncio.create_task(self._stop.wait())},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+            finally:
+                consumer.cancel()
+                producer.cancel()
+                ping.cancel()
+
+    async def _heartbeat(self, ws) -> None:
+        while True:
+            await asyncio.sleep(15)
+            await ws.send(encode_json({"type": "ping", "t": now_ms()}))
+
+    async def _produce(self, ws) -> None:
+        interval = 1 / self.fps
+        while True:
+            if self.session_id:
+                jpeg = await asyncio.to_thread(self.source.grab_jpeg, self.quality)
+                payload = pack_frame(jpeg, self.source.width, self.source.height, now_ms())
+                await ws.send(payload)
+            await asyncio.sleep(interval)
+
+    async def _consume(self, ws) -> None:
+        async for raw in ws:
+            if isinstance(raw, bytes):
+                self._on_binary(raw)
+                continue
+            msg = decode_json(raw)
+            kind = msg.get("type")
+            if kind == "session_start":
+                self.session_id = msg.get("session_id")
+                logger.info("session started by %s", msg.get("viewer_name"))
+                await ws.send(
+                    encode_json(
+                        {
+                            "type": "screen_info",
+                            "width": self.source.width,
+                            "height": self.source.height,
+                            "backend": self.source.backend_name(),
+                        }
+                    )
+                )
+            elif kind == "session_end":
+                self.session_id = None
+                logger.info("session ended: %s", msg.get("reason"))
+            elif kind == "input":
+                self._on_input(msg)
+            elif kind == "file_offer":
+                path = self.inbox.begin(int(msg["id"]), str(msg["name"]), int(msg.get("size") or 0))
+                logger.info("receiving file %s -> %s", msg["name"], path)
+            elif kind == "file_done":
+                path = self.inbox.finish(int(msg["id"]))
+                logger.info("file saved: %s", path)
+            elif kind == "chat":
+                print(f"  [聊天] {msg.get('from', 'viewer')}: {msg.get('text')}", flush=True)
+            elif kind == "password":
+                self.password = msg.get("temp_password")
+                if self.device_id and self.password:
+                    save_device_config({"device_id": self.device_id, "temp_password": self.password})
+                    print_banner(self.device_id, self.password, self.server, self.source.backend_name())
+
+    def _on_binary(self, data: bytes) -> None:
+        try:
+            kind = peek_binary_type(data)
+        except ValueError:
+            return
+        if kind == BinaryType.FILE_CHUNK:
+            transfer_id, offset, payload = unpack_file_chunk(data)
+            self.inbox.write(transfer_id, offset, payload)
+
+    def _on_input(self, msg: dict) -> None:
+        event = str(msg.get("event") or "")
+        if event in {"move", "down", "up", "scroll"}:
+            self.source.handle_mouse(event, int(msg.get("x") or 0), int(msg.get("y") or 0), str(msg.get("button") or "left"))
+        elif event in {"keydown", "keyup"}:
+            self.source.handle_key("down" if event == "keydown" else "up", str(msg.get("key") or ""))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="RemoteDesk host agent")
+    parser.add_argument("--server", default=os.environ.get("REMOTEDESK_SERVER", "ws://127.0.0.1:8080/ws"))
+    parser.add_argument("--fps", type=int, default=12)
+    parser.add_argument("--quality", type=int, default=70)
+    parser.add_argument("--virtual", action="store_true", help="force the demo virtual desktop")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    agent = HostAgent(server=args.server, fps=args.fps, quality=args.quality, prefer_virtual=args.virtual)
+    try:
+        asyncio.run(agent.run_forever())
+    except KeyboardInterrupt:
+        print("\n已退出", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

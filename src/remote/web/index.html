@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RemoteDesk</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">R</div>
+        <div>
+          <div class="brand-name">RemoteDesk</div>
+          <div class="brand-sub">远程协助</div>
+        </div>
+      </div>
+      <nav>
+        <button class="nav-item active" data-view="home">远程控制</button>
+        <button class="nav-item" data-view="files">远程文件</button>
+        <button class="nav-item" data-view="chat">消息</button>
+        <button class="nav-item" data-view="settings">设置</button>
+      </nav>
+      <div class="sidebar-foot">仅用于你授权的远程协助</div>
+    </aside>
+
+    <main class="main">
+      <section id="view-home" class="view">
+        <header class="topbar">
+          <h1>远程控制</h1>
+          <div id="status-pill" class="pill offline">未连接</div>
+        </header>
+
+        <div class="home-grid">
+          <article class="card id-card">
+            <div class="card-kicker">本机 / 演示主机</div>
+            <div class="id-label">识别码</div>
+            <div id="local-id" class="device-id">--- --- ---</div>
+            <div class="pass-row">
+              <div>
+                <div class="id-label">临时密码</div>
+                <div id="local-pass" class="password">--------</div>
+              </div>
+              <button id="copy-local" class="ghost">复制连接信息</button>
+            </div>
+            <p id="local-hint" class="hint">运行 <code>python -m remote host</code> 后，被控端会显示识别码和密码。</p>
+          </article>
+
+          <article class="card connect-card">
+            <div class="card-kicker">控制远程设备</div>
+            <label>对方识别码</label>
+            <input id="remote-id" maxlength="11" placeholder="123 456 789" autocomplete="off" />
+            <label>连接密码</label>
+            <input id="remote-pass" type="password" placeholder="临时密码或永久密码" />
+            <label>显示名称</label>
+            <input id="viewer-name" placeholder="我的电脑" />
+            <button id="btn-connect" class="primary">远程控制</button>
+            <p id="connect-error" class="error" hidden></p>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-session" class="view hidden">
+        <header class="topbar">
+          <h1 id="session-title">远程桌面</h1>
+          <div class="session-meta">
+            <span id="stat-fps">0 FPS</span>
+            <span id="stat-rtt">-- ms</span>
+            <span id="stat-size">--</span>
+            <button id="btn-hangup" class="danger">断开</button>
+          </div>
+        </header>
+        <div class="stage">
+          <canvas id="screen" tabindex="0"></canvas>
+          <div class="stage-hint">点击画面后即可用键鼠控制对方桌面</div>
+        </div>
+      </section>
+
+      <section id="view-files" class="view hidden">
+        <header class="topbar"><h1>远程文件</h1></header>
+        <article class="card">
+          <p>连接成功后，可将文件拖到下方发送到被控端的 <code>RemoteDeskDownloads</code> 目录。</p>
+          <div id="dropzone" class="dropzone">拖拽文件到这里，或点击选择</div>
+          <input id="file-input" type="file" multiple hidden />
+          <ul id="file-list" class="file-list"></ul>
+        </article>
+      </section>
+
+      <section id="view-chat" class="view hidden">
+        <header class="topbar"><h1>消息</h1></header>
+        <article class="card chat-card">
+          <div id="chat-log" class="chat-log"></div>
+          <form id="chat-form" class="chat-form">
+            <input id="chat-text" placeholder="发送一条消息…" autocomplete="off" />
+            <button class="primary" type="submit">发送</button>
+          </form>
+        </article>
+      </section>
+
+      <section id="view-settings" class="view hidden">
+        <header class="topbar"><h1>设置</h1></header>
+        <article class="card">
+          <p>中继地址由当前页面自动决定。生产环境请在反向代理后启用 HTTPS / WSS。</p>
+          <ul class="bullets">
+            <li>被控端必须由机主主动启动，离线后无法连接。</li>
+            <li>连接需要识别码 + 密码，密码错误会被拒绝。</li>
+            <li>同一时间一台主机只接受一个控制端。</li>
+            <li>本软件用于授权协助，请勿用于未授权访问。</li>
+          </ul>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
