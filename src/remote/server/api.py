@@ -1,4 +1,4 @@
-"""Relay + signaling server and static web UI."""
+"""Signaling server and static web UI. Media is P2P-only and is never relayed."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from remote.ids import constant_time_equals, format_device_id, normalize_device_id
-from remote.protocol import decode_json, encode_json, peek_binary_type
+from remote.p2p import SIGNAL_KINDS, ice_servers_payload
+from remote.protocol import decode_json, encode_json
 from remote.server.registry import Registry
 
 logger = logging.getLogger("remotedesk.server")
@@ -30,7 +31,12 @@ def create_app() -> FastAPI:
 
     @app.get("/api/config")
     async def config() -> dict[str, Any]:
-        payload: dict[str, Any] = {"mode": "server", "demo_host": None}
+        payload: dict[str, Any] = {
+            "mode": "server",
+            "transport": "p2p",
+            "ice_servers": ice_servers_payload(),
+            "demo_host": None,
+        }
         if demo_host:
             payload["demo_host"] = {
                 "device_id": demo_host["device_id"],
@@ -49,8 +55,7 @@ def create_app() -> FastAPI:
                     break
                 if "text" in message and message["text"] is not None:
                     await _handle_text(ws, message["text"])
-                elif "bytes" in message and message["bytes"] is not None:
-                    await _handle_binary(ws, message["bytes"])
+                # Binary media/files are P2P-only; the signaling socket ignores them.
         except WebSocketDisconnect:
             pass
         except Exception:
@@ -88,35 +93,28 @@ async def _handle_text(ws: WebSocket, raw: str) -> None:
         await _on_auth_result(ws, msg)
     elif kind == "hangup":
         await _on_hangup(ws, msg)
+    elif kind == "signal":
+        await _on_signal(ws, msg, raw)
     elif kind == "ping":
         device = registry.lookup_by_ws(ws)
         if device:
             registry.touch(device.device_id)
         await ws.send_text(encode_json({"type": "pong", "t": msg.get("t")}))
     else:
-        # Control messages after a session is up are relayed to the peer.
-        session = registry.session_for_ws(ws)
-        if not session or not session.accepted:
-            await ws.send_text(encode_json({"type": "error", "message": "unknown message"}))
-            return
-        peer = session.host_ws if ws is session.viewer_ws else session.viewer_ws
-        try:
-            await peer.send_text(raw)
-        except Exception:
-            await _end_and_notify(session.session_id, "peer_disconnected")
+        await ws.send_text(encode_json({"type": "error", "message": "unknown message"}))
 
 
-async def _handle_binary(ws: WebSocket, data: bytes) -> None:
+async def _on_signal(ws: WebSocket, msg: dict[str, Any], raw: str) -> None:
     session = registry.session_for_ws(ws)
     if not session or not session.accepted:
+        await ws.send_text(encode_json({"type": "error", "message": "no session"}))
         return
-    try:
-        peek_binary_type(data)
-    except ValueError:
+    if msg.get("kind") not in SIGNAL_KINDS:
+        await ws.send_text(encode_json({"type": "error", "message": "invalid signal"}))
         return
     peer = session.host_ws if ws is session.viewer_ws else session.viewer_ws
     try:
-        await peer.send_bytes(data)
+        await peer.send_text(raw)
     except Exception:
         await _end_and_notify(session.session_id, "peer_disconnected")
 
@@ -195,6 +193,8 @@ async def _on_connect(ws: WebSocket, msg: dict[str, Any]) -> None:
         "hostname": host.hostname,
         "os": host.os_name,
         "viewer_name": viewer_name,
+        "transport": "p2p",
+        "ice_servers": ice_servers_payload(),
     }
     await host.ws.send_text(encode_json(accepted))
     await ws.send_text(encode_json(accepted))

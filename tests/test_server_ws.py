@@ -14,10 +14,14 @@ def test_health_and_config(monkeypatch):
     assert health.json()["ok"] is True
     cfg = client.get("/api/config")
     assert cfg.json()["mode"] == "server"
+    assert cfg.json()["transport"] == "p2p"
     assert cfg.json()["demo_host"] is None
+    for server in cfg.json()["ice_servers"]:
+        for url in server["urls"]:
+            assert url.startswith("stun:")
 
 
-def test_register_connect_and_relay(monkeypatch):
+def test_register_connect_and_signal_only(monkeypatch):
     monkeypatch.setattr(server_mod, "registry", Registry())
     client = TestClient(create_app())
 
@@ -52,12 +56,24 @@ def test_register_connect_and_relay(monkeypatch):
         start_host = host.receive_json()
         assert start_viewer["type"] == "session_start"
         assert start_host["type"] == "session_start"
+        assert start_viewer["transport"] == "p2p"
 
         host.send_bytes(b"\x01" + b"frame")
-        relayed = viewer.receive_bytes()
-        assert relayed.startswith(b"\x01")
-
         viewer.send_json({"type": "input", "event": "move", "x": 10, "y": 20})
-        incoming = host.receive_json()
-        assert incoming["type"] == "input"
-        assert incoming["x"] == 10
+        viewer.send_json({
+            "type": "signal",
+            "kind": "offer",
+            "sdp": {"type": "offer", "sdp": "v=0"},
+        })
+        forwarded = host.receive_json()
+        assert forwarded["type"] == "signal"
+        assert forwarded["kind"] == "offer"
+
+        host.send_json({
+            "type": "signal",
+            "kind": "answer",
+            "sdp": {"type": "answer", "sdp": "v=0"},
+        })
+        answer = viewer.receive_json()
+        assert answer["type"] == "signal"
+        assert answer["kind"] == "answer"

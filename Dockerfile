@@ -7,3 +7,4 @@ RUN pip install --no-cache-dir -e .
 
 EXPOSE 8080
 CMD ["python", "-m", "remote", "server", "--host", "0.0.0.0", "--port", "8080"]
+

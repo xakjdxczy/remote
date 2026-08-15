@@ -2,13 +2,17 @@ const $ = (id) => document.getElementById(id);
 
 const state = {
   ws: null,
+  pc: null,
+  dc: null,
   session: false,
+  p2pReady: false,
   screenW: 1280,
   screenH: 720,
   frames: 0,
   lastFpsAt: Date.now(),
   lastPing: 0,
   transferSeq: 1,
+  iceServers: [],
 };
 
 function wsUrl() {
@@ -52,15 +56,44 @@ function formatId(raw) {
   return d.replace(/(\d{3})(\d{0,3})(\d{0,3})/, (_, a, b, c) => [a, b, c].filter(Boolean).join(" "));
 }
 
+function isRelayCandidateLine(line) {
+  if (!line.startsWith("a=candidate:")) return false;
+  const parts = line.split(/\s+/);
+  const typ = parts.indexOf("typ");
+  return typ >= 0 && parts[typ + 1] === "relay";
+}
+
+function stripRelaySdp(sdp) {
+  return sdp
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => !isRelayCandidateLine(line))
+    .join("\r\n") + "\r\n";
+}
+
+function waitGathering(pc, ms = 8000) {
+  if (pc.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    pc.addEventListener("icegatheringstatechange", () => {
+      if (pc.iceGatheringState === "complete") {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+  });
+}
+
 async function loadConfig() {
   const res = await fetch("/api/config");
   const cfg = await res.json();
+  state.iceServers = cfg.ice_servers || [];
   if (cfg.demo_host) {
     $("local-id").textContent = cfg.demo_host.device_id_display;
     $("local-pass").textContent = cfg.demo_host.password;
     $("remote-id").value = cfg.demo_host.device_id_display;
     $("remote-pass").value = cfg.demo_host.password;
-    $("local-hint").textContent = "演示主机已在线。可以直接点「远程控制」，或把识别码发给另一台电脑。";
+    $("local-hint").textContent = "演示主机已在线。连接后画面走 P2P 直连，不经过信令服务器。";
     setStatus("演示主机在线", "online");
   }
 }
@@ -72,24 +105,29 @@ function ensureSocket() {
   state.ws = ws;
   ws.addEventListener("message", onMessage);
   ws.addEventListener("close", () => {
-    if (state.session) endSession("连接已断开");
+    if (state.session) endSession("信令已断开");
     state.ws = null;
   });
   return new Promise((resolve, reject) => {
     ws.addEventListener("open", () => resolve(ws), { once: true });
-    ws.addEventListener("error", () => reject(new Error("无法连接中继")), { once: true });
+    ws.addEventListener("error", () => reject(new Error("无法连接信令服务器")), { once: true });
   });
 }
 
-function sendJson(obj) {
+function sendSignal(obj) {
   if (state.ws && state.ws.readyState === 1) {
     state.ws.send(JSON.stringify(obj));
   }
 }
 
+function sendSession(obj) {
+  if (state.dc && state.dc.readyState === "open") {
+    state.dc.send(JSON.stringify(obj));
+  }
+}
+
 function onMessage(ev) {
   if (typeof ev.data !== "string") {
-    drawFrame(ev.data);
     return;
   }
   const msg = JSON.parse(ev.data);
@@ -108,11 +146,29 @@ function onMessage(ev) {
     $("connect-error").hidden = true;
     $("session-title").textContent = `远程桌面 · ${msg.hostname || msg.host_id}`;
     showView("session");
-    setStatus("控制中", "busy");
-    addChat("系统", `已连接到 ${msg.hostname || msg.host_id}`);
+    setStatus("正在建立 P2P…", "busy");
+    addChat("系统", `信令已配对 ${msg.hostname || msg.host_id}，正在 P2P 直连`);
+    startP2P(msg).catch((err) => {
+      sendSignal({ type: "signal", kind: "failed", message: String(err) });
+      sendSignal({ type: "hangup", reason: "p2p_failed" });
+      endSession("P2P 直连失败");
+    });
   } else if (msg.type === "session_end") {
     endSession(msg.reason || "已断开");
-  } else if (msg.type === "screen_info") {
+  } else if (msg.type === "signal") {
+    handleSignal(msg);
+  } else if (msg.type === "error") {
+    addChat("系统", msg.message || "信令错误");
+  }
+}
+
+function onSessionMessage(data) {
+  if (typeof data !== "string") {
+    drawFrame(data);
+    return;
+  }
+  const msg = JSON.parse(data);
+  if (msg.type === "screen_info") {
     state.screenW = msg.width;
     state.screenH = msg.height;
     $("stat-size").textContent = `${msg.width}×${msg.height}`;
@@ -120,16 +176,70 @@ function onMessage(ev) {
     $("stat-rtt").textContent = `${Date.now() - Number(msg.t || state.lastPing)} ms`;
   } else if (msg.type === "chat") {
     addChat(msg.from || "对方", msg.text || "");
-  } else if (msg.type === "file_saved") {
-    addFileLine(`对方已保存 ${msg.name}`);
+  }
+}
+
+async function startP2P(session) {
+  closeP2P();
+  const iceServers = session.ice_servers || state.iceServers || [];
+  const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: "all" });
+  state.pc = pc;
+  const dc = pc.createDataChannel("session", { ordered: true });
+  dc.binaryType = "arraybuffer";
+  state.dc = dc;
+  dc.addEventListener("message", (ev) => onSessionMessage(ev.data));
+  dc.addEventListener("open", () => {
+    state.p2pReady = true;
+    setStatus("P2P 直连", "busy");
+    if ($("stat-path")) $("stat-path").textContent = "P2P";
+    addChat("系统", "P2P 已接通，画面和键鼠不再经过信令服务器");
+  });
+  dc.addEventListener("close", () => {
+    if (state.session) endSession("P2P 通道已关闭");
+  });
+  pc.addEventListener("iceconnectionstatechange", () => {
+    if (pc.iceConnectionState === "failed") {
+      sendSignal({ type: "signal", kind: "failed", message: "ice failed" });
+      sendSignal({ type: "hangup", reason: "p2p_failed" });
+      endSession("P2P 直连失败（没有中继回退）");
+    }
+  });
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await waitGathering(pc);
+  sendSignal({
+    type: "signal",
+    kind: "offer",
+    sdp: { type: pc.localDescription.type, sdp: stripRelaySdp(pc.localDescription.sdp) },
+  });
+}
+
+async function handleSignal(msg) {
+  if (!state.pc || msg.kind !== "answer" || !msg.sdp) return;
+  await state.pc.setRemoteDescription(msg.sdp);
+}
+
+function closeP2P() {
+  state.p2pReady = false;
+  if (state.dc) {
+    try { state.dc.close(); } catch { /* ignore */ }
+    state.dc = null;
+  }
+  if (state.pc) {
+    try { state.pc.close(); } catch { /* ignore */ }
+    state.pc = null;
   }
 }
 
 function endSession(reason) {
+  const wasSession = state.session;
   state.session = false;
-  showView("home");
-  setStatus("未连接", "offline");
-  addChat("系统", reason);
+  closeP2P();
+  if (wasSession) {
+    showView("home");
+    setStatus("未连接", "offline");
+    addChat("系统", reason);
+  }
 }
 
 function drawFrame(buffer) {
@@ -174,8 +284,8 @@ function canvasPoint(ev) {
 function bindInput() {
   const canvas = $("screen");
   const sendInput = (payload) => {
-    if (!state.session) return;
-    sendJson({ type: "input", ...payload });
+    if (!state.p2pReady) return;
+    sendSession({ type: "input", ...payload });
   };
   canvas.addEventListener("mousemove", (ev) => {
     const p = canvasPoint(ev);
@@ -221,7 +331,7 @@ async function connect() {
   setStatus("正在连接…", "busy");
   try {
     await ensureSocket();
-    sendJson({
+    sendSignal({
       type: "connect",
       device_id: deviceId,
       password,
@@ -235,7 +345,7 @@ async function connect() {
 }
 
 function hangup() {
-  sendJson({ type: "hangup", reason: "viewer_hangup" });
+  sendSignal({ type: "hangup", reason: "viewer_hangup" });
   endSession("已主动断开");
 }
 
@@ -246,24 +356,22 @@ function addFileLine(text) {
 }
 
 async function sendFiles(fileList) {
-  if (!state.session) {
-    addFileLine("请先建立远程连接");
+  if (!state.p2pReady) {
+    addFileLine("请先建立 P2P 连接");
     return;
   }
-  await ensureSocket();
   for (const file of fileList) {
     const id = state.transferSeq++;
-    sendJson({ type: "file_offer", id, name: file.name, size: file.size });
+    sendSession({ type: "file_offer", id, name: file.name, size: file.size });
     const buf = await file.arrayBuffer();
     const bytes = new Uint8Array(buf);
-    const chunk = 32 * 1024;
+    const chunk = 16 * 1024;
     for (let offset = 0; offset < bytes.length; offset += chunk) {
       const part = bytes.subarray(offset, offset + chunk);
       const header = new ArrayBuffer(13);
       const view = new DataView(header);
       view.setUint8(0, 2);
       view.setUint32(1, id);
-      // offset as uint64 big-endian
       const hi = Math.floor(offset / 2 ** 32);
       const lo = offset >>> 0;
       view.setUint32(5, hi);
@@ -271,9 +379,9 @@ async function sendFiles(fileList) {
       const out = new Uint8Array(13 + part.length);
       out.set(new Uint8Array(header), 0);
       out.set(part, 13);
-      state.ws.send(out);
+      state.dc.send(out);
     }
-    sendJson({ type: "file_done", id, name: file.name });
+    sendSession({ type: "file_done", id, name: file.name });
     addFileLine(`已发送 ${file.name} (${file.size} 字节)`);
   }
 }
@@ -304,7 +412,7 @@ function bindUi() {
     ev.preventDefault();
     const text = $("chat-text").value.trim();
     if (!text) return;
-    sendJson({ type: "chat", text, from: $("viewer-name").value || "viewer" });
+    sendSession({ type: "chat", text, from: $("viewer-name").value || "viewer" });
     addChat("我", text);
     $("chat-text").value = "";
   });
@@ -317,9 +425,9 @@ function bindUi() {
   });
   bindInput();
   setInterval(() => {
-    if (state.session && state.ws) {
+    if (state.p2pReady) {
       state.lastPing = Date.now();
-      sendJson({ type: "ping", t: state.lastPing });
+      sendSession({ type: "ping", t: state.lastPing });
     }
   }, 2000);
 }

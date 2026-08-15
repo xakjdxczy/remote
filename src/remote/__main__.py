@@ -15,7 +15,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="remotedesk", description="ToDesk-style remote assistance")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_server = sub.add_parser("server", help="run the relay + web UI")
+    p_server = sub.add_parser("server", help="run the signaling server + web UI")
     p_server.add_argument("--host", default="0.0.0.0")
     p_server.add_argument("--port", type=int, default=8080)
 
@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> None:
     p_host.add_argument("--quality", type=int, default=70)
     p_host.add_argument("--virtual", action="store_true")
 
-    p_demo = sub.add_parser("demo", help="start relay + a local demo host together")
+    p_demo = sub.add_parser("demo", help="start signaling + a local demo host together")
     p_demo.add_argument("--host", default="0.0.0.0")
     p_demo.add_argument("--port", type=int, default=8080)
     p_demo.add_argument("--fps", type=int, default=10)
@@ -47,7 +47,7 @@ def _run_server(host: str, port: int) -> None:
     import uvicorn
     from remote.server.api import app
 
-    print(f"RemoteDesk 中继已启动: http://{host}:{port}", flush=True)
+    print(f"RemoteDesk 信令已启动: http://{host}:{port} （画面仅 P2P）", flush=True)
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

@@ -1,4 +1,4 @@
-"""Host agent: register with the relay, stream frames, apply input."""
+"""Host agent: register with signaling, stream frames over WebRTC P2P."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 
 from remote.host.capture import now_ms, open_frame_source
 from remote.host.files import FileInbox
+from remote.host.webrtc import HostPeer
 from remote.ids import format_device_id, generate_temp_password
 from remote.protocol import decode_json, encode_json, pack_frame, peek_binary_type, unpack_file_chunk, BinaryType
 
@@ -45,7 +46,7 @@ def print_banner(device_id: str, password: str, server: str, backend: str) -> No
         "  ├──────────────────────────────────────────┤",
         f"  │  本机识别码   {pretty:<26}│",
         f"  │  临时密码     {password:<26}│",
-        f"  │  中继服务器   {server:<26}│",
+        f"  │  信令服务器   {server:<26}│",
         f"  │  画面来源     {backend:<26}│",
         "  │  状态         在线                       │",
         "  └──────────────────────────────────────────┘",
@@ -78,6 +79,7 @@ class HostAgent:
         self._stop = asyncio.Event()
         self._ws = None
         self._send_lock = asyncio.Lock()
+        self._peer: HostPeer | None = None
 
     async def run_forever(self) -> None:
         while not self._stop.is_set():
@@ -154,10 +156,11 @@ class HostAgent:
     async def _produce(self, ws) -> None:
         interval = 1 / self.fps
         while True:
-            if self.session_id:
+            peer = self._peer
+            if peer and peer.is_open:
                 jpeg = await asyncio.to_thread(self.source.grab_jpeg, self.quality)
                 payload = pack_frame(jpeg, self.source.width, self.source.height, now_ms())
-                await self._send(ws, payload)
+                peer.send(payload)
             await asyncio.sleep(interval)
 
     async def _consume(self, ws) -> None:
@@ -168,37 +171,72 @@ class HostAgent:
             msg = decode_json(raw)
             kind = msg.get("type")
             if kind == "session_start":
-                self.session_id = msg.get("session_id")
-                logger.info("session started by %s", msg.get("viewer_name"))
-                await self._send(
-                    ws,
-                    encode_json(
-                        {
-                            "type": "screen_info",
-                            "width": self.source.width,
-                            "height": self.source.height,
-                            "backend": self.source.backend_name(),
-                        }
-                    ),
-                )
+                await self._start_peer(ws, msg)
             elif kind == "session_end":
-                self.session_id = None
-                logger.info("session ended: %s", msg.get("reason"))
-            elif kind == "input":
-                self._on_input(msg)
-            elif kind == "file_offer":
-                path = self.inbox.begin(int(msg["id"]), str(msg["name"]), int(msg.get("size") or 0))
-                logger.info("receiving file %s -> %s", msg["name"], path)
-            elif kind == "file_done":
-                path = self.inbox.finish(int(msg["id"]))
-                logger.info("file saved: %s", path)
-            elif kind == "chat":
-                print(f"  [聊天] {msg.get('from', 'viewer')}: {msg.get('text')}", flush=True)
+                await self._stop_peer(str(msg.get("reason") or ""))
+            elif kind == "signal":
+                if self._peer:
+                    await self._peer.handle_signal(msg)
             elif kind == "password":
                 self.password = msg.get("temp_password")
                 if self.device_id and self.password:
                     save_device_config({"device_id": self.device_id, "temp_password": self.password})
                     print_banner(self.device_id, self.password, self.server, self.source.backend_name())
+
+    async def _start_peer(self, ws, msg: dict) -> None:
+        if self._peer:
+            await self._peer.close()
+        self.session_id = msg.get("session_id")
+        logger.info("session started by %s (P2P only)", msg.get("viewer_name"))
+
+        async def send_signal(payload: dict) -> None:
+            await self._send(ws, encode_json(payload))
+
+        self._peer = HostPeer(send_signal, self._on_session_payload, on_open=self._on_p2p_open)
+
+    def _on_p2p_open(self) -> None:
+        if not self._peer:
+            return
+        self._peer.send(
+            encode_json(
+                {
+                    "type": "screen_info",
+                    "width": self.source.width,
+                    "height": self.source.height,
+                    "backend": self.source.backend_name(),
+                }
+            )
+        )
+
+    async def _stop_peer(self, reason: str) -> None:
+        self.session_id = None
+        if self._peer:
+            await self._peer.close()
+            self._peer = None
+        logger.info("session ended: %s", reason)
+
+    def _on_session_payload(self, raw: str | bytes) -> None:
+        if isinstance(raw, bytes):
+            self._on_binary(raw)
+            return
+        try:
+            msg = decode_json(raw)
+        except ValueError:
+            return
+        kind = msg.get("type")
+        if kind == "input":
+            self._on_input(msg)
+        elif kind == "file_offer":
+            path = self.inbox.begin(int(msg["id"]), str(msg["name"]), int(msg.get("size") or 0))
+            logger.info("receiving file %s -> %s", msg["name"], path)
+        elif kind == "file_done":
+            path = self.inbox.finish(int(msg["id"]))
+            logger.info("file saved: %s", path)
+        elif kind == "chat":
+            print(f"  [聊天] {msg.get('from', 'viewer')}: {msg.get('text')}", flush=True)
+        elif kind == "ping":
+            if self._peer:
+                self._peer.send(encode_json({"type": "pong", "t": msg.get("t")}))
 
     def _on_binary(self, data: bytes) -> None:
         try:
