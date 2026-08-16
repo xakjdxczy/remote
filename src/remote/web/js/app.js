@@ -15,7 +15,24 @@ const state = {
   iceServers: [],
   relayEnabled: false,
   connMethod: null,
+  statsTimer: null,
+  lastBytes: 0,
+  lastStatsAt: 0,
+  sessionBytes: 0,
 };
+
+const TRAFFIC_KEY = "dustx_traffic_total_bytes";
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+function fmtSpeed(bytesPerSec) {
+  const bits = bytesPerSec * 8;
+  if (bits < 1e6) return `${(bits / 1e3).toFixed(0)} Kbps`;
+  return `${(bits / 1e6).toFixed(2)} Mbps`;
+}
 
 function wsUrl() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -206,8 +223,7 @@ function onMessage(ev) {
 
 function onSessionMessage(data) {
   if (typeof data !== "string") {
-    drawFrame(data);
-    return;
+    return; // screen is a WebRTC video track now; datachannel carries no frames
   }
   const msg = JSON.parse(data);
   if (msg.type === "screen_info") {
@@ -229,6 +245,16 @@ async function startP2P(session) {
   const dc = pc.createDataChannel("session", { ordered: true });
   dc.binaryType = "arraybuffer";
   state.dc = dc;
+  // Receive the screen as a WebRTC video track.
+  pc.addTransceiver("video", { direction: "recvonly" });
+  pc.addEventListener("track", (ev) => {
+    const v = $("screen");
+    if (v && ev.streams && ev.streams[0]) {
+      v.srcObject = ev.streams[0];
+      const p = v.play();
+      if (p && p.catch) p.catch(() => {});
+    }
+  });
   dc.addEventListener("message", (ev) => onSessionMessage(ev.data));
   dc.addEventListener("open", () => {
     state.p2pReady = true;
@@ -238,6 +264,7 @@ async function startP2P(session) {
     setTimeout(detectConnType, 600);
     setTimeout(detectConnType, 1800);
     setTimeout(detectConnType, 3500);
+    startStats();
   });
   dc.addEventListener("close", () => {
     if (state.session) endSession("P2P 通道已关闭");
@@ -266,6 +293,9 @@ async function handleSignal(msg) {
 
 function closeP2P() {
   state.p2pReady = false;
+  stopStats();
+  const v = $("screen");
+  if (v) { try { v.srcObject = null; } catch { /* ignore */ } }
   if (state.dc) {
     try { state.dc.close(); } catch { /* ignore */ }
     state.dc = null;
@@ -287,42 +317,59 @@ function endSession(reason) {
   }
 }
 
-function drawFrame(buffer) {
-  const view = new DataView(buffer);
-  if (view.byteLength < 13 || view.getUint8(0) !== 1) return;
-  const width = view.getUint16(1);
-  const height = view.getUint16(3);
-  state.screenW = width;
-  state.screenH = height;
-  const jpeg = buffer.slice(13);
-  const blob = new Blob([jpeg], { type: "image/jpeg" });
-  const url = URL.createObjectURL(blob);
-  const img = new Image();
-  img.onload = () => {
-    const canvas = $("screen");
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+// ---- traffic / speed stats (from WebRTC getStats) ----
+function startStats() {
+  stopStats();
+  state.lastBytes = 0;
+  state.lastStatsAt = Date.now();
+  state.sessionBytes = 0;
+  state.statsTimer = setInterval(pollStats, 1000);
+}
+function stopStats() {
+  if (state.statsTimer) { clearInterval(state.statsTimer); state.statsTimer = null; }
+}
+async function pollStats() {
+  if (!state.pc) return;
+  try {
+    const stats = await state.pc.getStats();
+    let bytes = 0;
+    let fps = null;
+    let w = null; let h = null;
+    stats.forEach((r) => {
+      if ((r.type === "inbound-rtp" && r.kind === "video") || r.type === "data-channel") {
+        if (typeof r.bytesReceived === "number") bytes += r.bytesReceived;
+      }
+      if (r.type === "inbound-rtp" && r.kind === "video") {
+        if (typeof r.framesPerSecond === "number") fps = r.framesPerSecond;
+        if (typeof r.frameWidth === "number") { w = r.frameWidth; h = r.frameHeight; }
+      }
+    });
+    const now = Date.now();
+    if (state.lastBytes && bytes >= state.lastBytes) {
+      const dt = (now - state.lastStatsAt) / 1000;
+      const delta = bytes - state.lastBytes;
+      if (dt > 0) $("stat-speed").textContent = fmtSpeed(delta / dt);
+      // accumulate historical total
+      const prev = Number(localStorage.getItem(TRAFFIC_KEY) || 0);
+      localStorage.setItem(TRAFFIC_KEY, String(prev + delta));
     }
-    canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-    URL.revokeObjectURL(url);
-  };
-  img.src = url;
-  state.frames += 1;
-  const now = Date.now();
-  if (now - state.lastFpsAt >= 1000) {
-    $("stat-fps").textContent = `${state.frames} FPS`;
-    $("stat-size").textContent = `${width}×${height}`;
-    state.frames = 0;
-    state.lastFpsAt = now;
-  }
+    state.sessionBytes = bytes;
+    state.lastBytes = bytes;
+    state.lastStatsAt = now;
+    $("stat-session").textContent = `本次 ${fmtBytes(state.sessionBytes)}`;
+    $("stat-total").textContent = `历史 ${fmtBytes(Number(localStorage.getItem(TRAFFIC_KEY) || 0))}`;
+    if (fps != null) $("stat-fps").textContent = `${Math.round(fps)} FPS`;
+    if (w) { state.screenW = w; state.screenH = h; $("stat-size").textContent = `${w}×${h}`; }
+  } catch { /* ignore */ }
 }
 
 function canvasPoint(ev) {
-  const canvas = $("screen");
-  const rect = canvas.getBoundingClientRect();
-  const x = ((ev.clientX - rect.left) / rect.width) * state.screenW;
-  const y = ((ev.clientY - rect.top) / rect.height) * state.screenH;
+  const el = $("screen");
+  const rect = el.getBoundingClientRect();
+  const iw = el.videoWidth || state.screenW;
+  const ih = el.videoHeight || state.screenH;
+  const x = ((ev.clientX - rect.left) / rect.width) * iw;
+  const y = ((ev.clientY - rect.top) / rect.height) * ih;
   return { x: Math.round(x), y: Math.round(y) };
 }
 

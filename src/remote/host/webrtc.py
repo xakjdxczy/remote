@@ -1,10 +1,21 @@
-"""Host-side WebRTC peer. Session bytes only travel on the data channel."""
+"""Host-side WebRTC peer.
+
+The screen is sent as a real WebRTC **video track** (VP8/H264, encoded by
+aiortc) instead of JPEG-over-datachannel: far less bandwidth (inter-frame
+compression, near-zero when the screen is static) and adaptive bitrate. Input,
+chat, files and pings still travel on the "session" data channel.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
+from fractions import Fraction
 from typing import Any
+
+from aiortc import VideoStreamTrack
 
 from remote.p2p import maybe_strip_relay, rtc_configuration, wait_ice_complete
 
@@ -14,16 +25,59 @@ SendSignal = Callable[[dict[str, Any]], Awaitable[None]]
 OnPayload = Callable[[str | bytes], None]
 OnOpen = Callable[[], None]
 
+VIDEO_CLOCK_RATE = 90000
+
+
+class ScreenVideoTrack(VideoStreamTrack):
+    """A WebRTC video track that pulls frames from a FrameSource at ~fps."""
+
+    kind = "video"
+
+    def __init__(self, source: Any, fps: int = 12) -> None:
+        super().__init__()
+        self._source = source
+        self._fps = max(2, min(fps, 30))
+        self._interval = 1.0 / self._fps
+        self._start: float | None = None
+        self._count = 0
+
+    async def recv(self):
+        import av  # bundled with aiortc
+
+        now = time.time()
+        if self._start is None:
+            self._start = now
+        target = self._start + self._count * self._interval
+        delay = target - now
+        if delay > 0:
+            await asyncio.sleep(delay)
+        img = await asyncio.to_thread(self._source.grab_image)
+        frame = av.VideoFrame.from_image(img)
+        frame.pts = int(self._count * (VIDEO_CLOCK_RATE / self._fps))
+        frame.time_base = Fraction(1, VIDEO_CLOCK_RATE)
+        self._count += 1
+        return frame
+
 
 class HostPeer:
-    def __init__(self, send_signal: SendSignal, on_payload: OnPayload, on_open: OnOpen | None = None) -> None:
+    def __init__(
+        self,
+        send_signal: SendSignal,
+        on_payload: OnPayload,
+        on_open: OnOpen | None = None,
+        source: Any | None = None,
+        fps: int = 12,
+    ) -> None:
         from aiortc import RTCPeerConnection
 
         self._send_signal = send_signal
         self._on_payload = on_payload
         self._on_open = on_open
+        self._source = source
+        self._fps = fps
         self.pc = RTCPeerConnection(configuration=rtc_configuration())
         self.channel = None
+        self._track: ScreenVideoTrack | None = None
         self._bind_pc()
 
     def _bind_pc(self) -> None:
@@ -55,14 +109,6 @@ class HostPeer:
         if channel.readyState == "open" and self._on_open:
             self._on_open()
 
-        @self.pc.on("iceconnectionstatechange")
-        def _on_ice() -> None:
-            logger.info("ICE %s", self.pc.iceConnectionState)
-
-        @self.pc.on("connectionstatechange")
-        def _on_conn() -> None:
-            logger.info("P2P %s", self.pc.connectionState)
-
     @property
     def is_open(self) -> bool:
         return bool(self.channel) and self.channel.readyState == "open"
@@ -81,6 +127,10 @@ class HostPeer:
             await self.pc.setRemoteDescription(
                 RTCSessionDescription(sdp=str(sdp.get("sdp") or ""), type=str(sdp.get("type") or "offer"))
             )
+            # Attach the screen video track to answer the viewer's recvonly video.
+            if self._source is not None and self._track is None:
+                self._track = ScreenVideoTrack(self._source, self._fps)
+                self.pc.addTrack(self._track)
             answer = await self.pc.createAnswer()
             await self.pc.setLocalDescription(answer)
             await wait_ice_complete(self.pc)
@@ -99,6 +149,11 @@ class HostPeer:
         try:
             if self.channel:
                 self.channel.close()
+        except Exception:
+            pass
+        try:
+            if self._track:
+                self._track.stop()
         except Exception:
             pass
         try:

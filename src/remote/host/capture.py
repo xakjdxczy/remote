@@ -28,6 +28,7 @@ class FrameSource(Protocol):
     height: int
 
     def grab_jpeg(self, quality: int = 70) -> bytes: ...
+    def grab_image(self): ...
     def handle_mouse(self, event: str, x: int, y: int, button: str = "left") -> None: ...
     def handle_key(self, event: str, key: str) -> None: ...
     def backend_name(self) -> str: ...
@@ -49,6 +50,9 @@ class VirtualSource:
 
     def grab_jpeg(self, quality: int = 70) -> bytes:
         return self.desktop.render_jpeg(quality=quality)
+
+    def grab_image(self):
+        return self.desktop.render_image()
 
     def handle_mouse(self, event: str, x: int, y: int, button: str = "left") -> None:
         self.desktop.handle_mouse(event, x, y, button)

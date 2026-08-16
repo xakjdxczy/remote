@@ -38,4 +38,4 @@ def test_unregister_ends_session():
     dropped = registry.unregister(host_ws)
     assert len(dropped) == 1
     assert registry.get(host.device_id) is None
-    assert registry.stats() == {"hosts": 0, "sessions": 0}
+    assert registry.stats() == {"hosts": 0, "sessions": 0, "total_sessions": 1}

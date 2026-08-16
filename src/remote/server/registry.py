@@ -41,6 +41,7 @@ class Registry:
         self.devices: dict[str, Device] = {}
         self.sessions: dict[str, Session] = {}
         self._ws_index: dict[int, str] = {}
+        self.total_sessions = 0
 
     def register_host(
         self,
@@ -122,6 +123,7 @@ class Registry:
         )
         self.sessions[session.session_id] = session
         host.session_id = session.session_id
+        self.total_sessions += 1
         return session
 
     def get_session(self, session_id: str) -> Session | None:
@@ -152,4 +154,5 @@ class Registry:
         return {
             "hosts": len(self.devices),
             "sessions": len(self.sessions),
+            "total_sessions": self.total_sessions,
         }

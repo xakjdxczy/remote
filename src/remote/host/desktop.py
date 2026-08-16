@@ -129,7 +129,8 @@ class DesktopSource:
             return None
 
     # -- capture --------------------------------------------------------------
-    def grab_jpeg(self, quality: int = 70) -> bytes:
+    def grab_image(self):
+        """Capture the monitor as a PIL RGB image, capped to <=720p."""
         raw = self._grab(self._monitor)
         img = self._Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
         if img.width > self._max_width:
@@ -139,8 +140,11 @@ class DesktopSource:
             ratio = self._max_height / img.height
             img = img.resize((max(1, int(img.width * ratio)), self._max_height))
         self.width, self.height = img.size
+        return img
+
+    def grab_jpeg(self, quality: int = 70) -> bytes:
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        self.grab_image().save(buf, format="JPEG", quality=quality, optimize=True)
         return buf.getvalue()
 
     # -- coordinate mapping ---------------------------------------------------

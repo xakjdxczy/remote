@@ -12,7 +12,6 @@ aiortc = pytest.importorskip("aiortc")
 
 from remote.host.agent import HostAgent
 from remote.p2p import rtc_configuration, strip_relay_sdp, wait_ice_complete
-from remote.protocol import BinaryType, peek_binary_type
 from remote.server.api import create_app
 
 
@@ -24,7 +23,7 @@ def _free_port() -> int:
     return port
 
 
-async def _viewer_receive_frame(server: str, device_id: str, password: str) -> bytes:
+async def _viewer_receive_video(server: str, device_id: str, password: str):
     from aiortc import RTCPeerConnection, RTCSessionDescription
 
     async with websockets.connect(server, max_size=8 * 1024 * 1024) as ws:
@@ -39,18 +38,21 @@ async def _viewer_receive_frame(server: str, device_id: str, password: str) -> b
         assert start["transport"] == "p2p"
 
         pc = RTCPeerConnection(configuration=rtc_configuration())
-        channel = pc.createDataChannel("session")
-        frames: list[bytes] = []
-        opened = asyncio.Event()
+        pc.createDataChannel("session")
+        pc.addTransceiver("video", direction="recvonly")
+        got = asyncio.Event()
+        holder: dict = {}
 
-        @channel.on("open")
-        def _on_open() -> None:
-            opened.set()
+        @pc.on("track")
+        def _on_track(track) -> None:
+            async def _reader() -> None:
+                try:
+                    holder["frame"] = await track.recv()
+                    got.set()
+                except Exception:
+                    pass
 
-        @channel.on("message")
-        def _on_message(message) -> None:
-            if isinstance(message, bytes):
-                frames.append(message)
+            asyncio.ensure_future(_reader())
 
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
@@ -62,7 +64,7 @@ async def _viewer_receive_frame(server: str, device_id: str, password: str) -> b
         }))
 
         while True:
-            raw = await asyncio.wait_for(ws.recv(), timeout=8)
+            raw = await asyncio.wait_for(ws.recv(), timeout=10)
             msg = json.loads(raw)
             if msg.get("type") == "signal" and msg.get("kind") == "answer":
                 await pc.setRemoteDescription(
@@ -70,17 +72,14 @@ async def _viewer_receive_frame(server: str, device_id: str, password: str) -> b
                 )
                 break
 
-        await asyncio.wait_for(opened.wait(), timeout=8)
-        deadline = time.time() + 8
-        while time.time() < deadline and not frames:
-            await asyncio.sleep(0.05)
+        await asyncio.wait_for(got.wait(), timeout=20)
         await ws.send(json.dumps({"type": "hangup", "reason": "done"}))
+        frame = holder["frame"]
         await pc.close()
-        assert frames, "P2P datachannel received no frames"
-        return frames[0]
+        return frame
 
 
-def test_p2p_e2e_frame_over_datachannel():
+def test_p2p_e2e_video_track():
     port = _free_port()
     config = uvicorn.Config(create_app(), host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
@@ -110,8 +109,10 @@ def test_p2p_e2e_frame_over_datachannel():
         time.sleep(0.05)
     assert "device_id" in creds
 
-    frame = asyncio.run(_viewer_receive_frame(f"ws://127.0.0.1:{port}/ws", creds["device_id"], creds["password"]))
-    assert peek_binary_type(frame) == BinaryType.FRAME
-    assert b"\xff\xd8" in frame
+    frame = asyncio.run(_viewer_receive_video(f"ws://127.0.0.1:{port}/ws", creds["device_id"], creds["password"]))
+    # A decoded WebRTC video frame from the host's screen track.
+    assert frame is not None
+    assert getattr(frame, "width", 0) > 0
+    assert getattr(frame, "height", 0) > 0
     agent.stop()
     server.should_exit = True

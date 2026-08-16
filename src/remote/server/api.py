@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +23,34 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 registry = Registry()
 demo_host: dict[str, str] | None = None
+SERVER_START = time.time()
+
+
+def _scrape_coturn_bytes() -> int | None:
+    """Best-effort total relayed bytes from coturn's Prometheus endpoint.
+
+    The signaling server carries no media (P2P), so the only server-side data
+    traffic is the TURN relay. Returns None when coturn/Prometheus is absent.
+    """
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:9641/metrics", timeout=1.5) as resp:
+            text = resp.read().decode("utf-8", "replace")
+    except Exception:
+        return None
+    total = 0.0
+    found = False
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        name = line.split(" ")[0].split("{")[0]
+        # coturn byte counters end in 'sentb' / 'rcvb'
+        if name.startswith("turn_") and (name.endswith("sentb") or name.endswith("rcvb")):
+            try:
+                total += float(line.split(" ")[-1])
+                found = True
+            except ValueError:
+                pass
+    return int(total) if found else None
 
 
 def create_app() -> FastAPI:
@@ -28,6 +59,16 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         return {"ok": True, **registry.stats()}
+
+    @app.get("/api/stats")
+    async def stats() -> dict[str, Any]:
+        relay = await asyncio.to_thread(_scrape_coturn_bytes)
+        return {
+            "uptime_sec": int(time.time() - SERVER_START),
+            **registry.stats(),
+            "relay_bytes_total": relay,
+            "relay_available": relay is not None,
+        }
 
     @app.get("/api/config")
     async def config() -> dict[str, Any]:
@@ -69,6 +110,10 @@ def create_app() -> FastAPI:
         @app.get("/")
         async def index() -> FileResponse:
             return FileResponse(WEB_DIR / "index.html")
+
+        @app.get("/stats")
+        async def stats_page() -> FileResponse:
+            return FileResponse(WEB_DIR / "stats.html")
 
     return app
 
