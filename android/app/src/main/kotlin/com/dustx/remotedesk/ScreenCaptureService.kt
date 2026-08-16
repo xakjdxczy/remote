@@ -20,7 +20,11 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.util.DisplayMetrics
 import android.util.Log
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
+import org.webrtc.PeerConnection
 import java.io.ByteArrayOutputStream
 
 /** Foreground service: screen capture via MediaProjection + signaling + WebRTC. */
@@ -44,12 +48,44 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
     private val frameIntervalMs = 80L // ~12fps
     private val quality = 45
 
-    private val iceUrls = listOf(
+    private val stunUrls = listOf(
         "stun:stun.l.google.com:19302",
         "stun:stun.qq.com:3478",
         "stun:stun.miwifi.com:3478",
         "stun:stun.cloudflare.com:3478",
     )
+    @Volatile private var iceServers: List<PeerConnection.IceServer> = defaultIceServers()
+
+    private fun defaultIceServers(): List<PeerConnection.IceServer> =
+        listOf(PeerConnection.IceServer.builder(stunUrls).createIceServer())
+
+    /** Fetch ice_servers (incl. optional TURN) from the signaling server's /api/config. */
+    private fun fetchIceServers(wsUrl: String): List<PeerConnection.IceServer> {
+        return try {
+            val base = wsUrl.replace("wss://", "https://").replace("ws://", "http://").removeSuffix("/ws")
+            val body = OkHttpClient().newCall(Request.Builder().url("$base/api/config").build())
+                .execute().use { it.body?.string() } ?: return defaultIceServers()
+            val arr = JSONObject(body).optJSONArray("ice_servers") ?: return defaultIceServers()
+            val out = ArrayList<PeerConnection.IceServer>()
+            for (i in 0 until arr.length()) {
+                val s = arr.getJSONObject(i)
+                val urls = ArrayList<String>()
+                when (val u = s.opt("urls")) {
+                    is JSONArray -> for (j in 0 until u.length()) urls.add(u.getString(j))
+                    is String -> urls.add(u)
+                }
+                if (urls.isEmpty()) continue
+                val b = PeerConnection.IceServer.builder(urls)
+                s.optString("username").takeIf { it.isNotEmpty() }?.let { b.setUsername(it) }
+                s.optString("credential").takeIf { it.isNotEmpty() }?.let { b.setPassword(it) }
+                out.add(b.createIceServer())
+            }
+            if (out.isEmpty()) defaultIceServers() else out
+        } catch (e: Exception) {
+            Log.w(TAG, "fetch ice servers failed: ${e.message}")
+            defaultIceServers()
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -69,6 +105,7 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
             override fun onStop() { stopSelf() }
         }, Handler(mainLooper))
 
+        Thread { iceServers = fetchIceServers(url) }.start()
         startCapture()
         startSignaling(url)
         HostState.set(status = "正在连接信令…")
@@ -144,7 +181,7 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
 
     override fun onSessionStart(msg: JSONObject) {
         host?.close()
-        val h = WebRtcHost(applicationContext, signaling!!, iceUrls, capW, capH, deviceW, deviceH)
+        val h = WebRtcHost(applicationContext, signaling!!, iceServers, capW, capH, deviceW, deviceH)
         host = h
         h.start()
         HostState.set(status = "有人接入，正在建立 P2P…")

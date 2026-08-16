@@ -26,7 +26,7 @@ import kotlin.math.abs
 class WebRtcHost(
     private val appContext: Context,
     private val signaling: SignalingClient,
-    private val iceUrls: List<String>,
+    private val iceServers: List<PeerConnection.IceServer>,
     private val reportedW: Int,
     private val reportedH: Int,
     private val deviceW: Int,
@@ -43,8 +43,7 @@ class WebRtcHost(
 
     fun start() {
         ensureFactory(appContext)
-        val servers = iceUrls.map { PeerConnection.IceServer.builder(it).createIceServer() }
-        val config = PeerConnection.RTCConfiguration(servers).apply {
+        val config = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
         pc = factory!!.createPeerConnection(config, pcObserver)
@@ -146,6 +145,10 @@ class WebRtcHost(
             when (msg.optString("type")) {
                 "input" -> handleInput(msg)
                 "ping" -> sendJson(JSONObject().put("type", "pong").put("t", msg.opt("t")))
+                "conn_info" -> {
+                    val m = if (msg.optString("method") == "relay") "TURN 中继（经服务器转发）" else "P2P 直连"
+                    HostState.set(status = "被控中 · $m")
+                }
             }
         }
     }
