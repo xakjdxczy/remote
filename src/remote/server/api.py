@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
 import time
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -26,31 +27,60 @@ demo_host: dict[str, str] | None = None
 SERVER_START = time.time()
 
 
-def _scrape_coturn_bytes() -> int | None:
-    """Best-effort total relayed bytes from coturn's Prometheus endpoint.
+def _net_bytes() -> int | None:
+    """Total NIC bytes (rx+tx) across non-loopback interfaces, from /proc/net/dev.
 
-    The signaling server carries no media (P2P), so the only server-side data
-    traffic is the TURN relay. Returns None when coturn/Prometheus is absent.
+    Reflects the server's real network usage (signaling + TURN relay + web).
     """
     try:
-        with urllib.request.urlopen("http://127.0.0.1:9641/metrics", timeout=1.5) as resp:
-            text = resp.read().decode("utf-8", "replace")
+        total = 0
+        with open("/proc/net/dev") as fh:
+            for line in fh.readlines()[2:]:
+                iface, _, data = line.partition(":")
+                if iface.strip() == "lo":
+                    continue
+                parts = data.split()
+                if len(parts) >= 9:
+                    total += int(parts[0]) + int(parts[8])  # rx bytes + tx bytes
+        return total
     except Exception:
         return None
-    total = 0.0
-    found = False
-    for line in text.splitlines():
-        if not line or line.startswith("#"):
-            continue
-        name = line.split(" ")[0].split("{")[0]
-        # coturn byte counters end in 'sentb' / 'rcvb'
-        if name.startswith("turn_") and (name.endswith("sentb") or name.endswith("rcvb")):
-            try:
-                total += float(line.split(" ")[-1])
-                found = True
-            except ValueError:
-                pass
-    return int(total) if found else None
+
+
+NET_START = _net_bytes() or 0
+
+_RELAY_LOG = os.environ.get("COTURN_LOG", "/var/log/turnserver/turn.log")
+_relay_state = {"offset": 0, "total": 0}
+_relay_re = re.compile(r"rb=(\d+).*?sb=(\d+)")
+
+
+def _scrape_coturn_bytes() -> int | None:
+    """Cumulative TURN-relayed bytes, parsed from coturn's usage log.
+
+    The signaling server carries no media (P2P), so the only server-side data
+    traffic is the TURN relay. coturn logs a ``usage: ... rb=.. sb=..`` line per
+    session; we sum rb+sb incrementally. Returns None when no log is available
+    (TURN disabled / no coturn), so the UI can degrade gracefully. Note: usage
+    lines are emitted at session close, so this is cumulative, not instantaneous.
+    """
+    try:
+        if not os.path.exists(_RELAY_LOG):
+            return None
+        size = os.path.getsize(_RELAY_LOG)
+        if size < _relay_state["offset"]:  # rotated/truncated
+            _relay_state["offset"] = 0
+            _relay_state["total"] = 0
+        with open(_RELAY_LOG, "r", errors="replace") as fh:
+            fh.seek(_relay_state["offset"])
+            for line in fh:
+                if "usage" in line:
+                    m = _relay_re.search(line)
+                    if m:
+                        _relay_state["total"] += int(m.group(1)) + int(m.group(2))
+            _relay_state["offset"] = fh.tell()
+        return int(_relay_state["total"])
+    except Exception:
+        return None
 
 
 def create_app() -> FastAPI:
@@ -63,9 +93,12 @@ def create_app() -> FastAPI:
     @app.get("/api/stats")
     async def stats() -> dict[str, Any]:
         relay = await asyncio.to_thread(_scrape_coturn_bytes)
+        nb = _net_bytes()
         return {
             "uptime_sec": int(time.time() - SERVER_START),
             **registry.stats(),
+            "net_bytes_total": nb,
+            "net_bytes_session": (nb - NET_START) if nb is not None else None,
             "relay_bytes_total": relay,
             "relay_available": relay is not None,
         }

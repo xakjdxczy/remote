@@ -26,8 +26,10 @@
     <div class="card"><label>在线被控端</label><b id="hosts">--</b></div>
     <div class="card"><label>当前会话</label><b id="sessions">--</b></div>
     <div class="card"><label>累计会话</label><b id="total">--</b></div>
-    <div class="card"><label>中继实时速率</label><b id="relay-speed">--</b></div>
-    <div class="card"><label>中继累计流量</label><b id="relay-total">--</b></div>
+    <div class="card"><label>服务器实时网速</label><b id="net-speed" class="ok">--</b></div>
+    <div class="card"><label>本次流量(自启动)</label><b id="net-session">--</b></div>
+    <div class="card"><label>历史流量(自开机)</label><b id="net-total">--</b></div>
+    <div class="card"><label>TURN 中继累计</label><b id="relay-total">--</b></div>
   </div>
   <p class="note" id="relay-note"></p>
 </div>
@@ -35,7 +37,7 @@
 function fmtBytes(n){ if(n==null) return "--"; if(n<1024) return n+" B"; if(n<1048576) return (n/1024).toFixed(1)+" KB"; if(n<1073741824) return (n/1048576).toFixed(1)+" MB"; return (n/1073741824).toFixed(2)+" GB"; }
 function fmtSpeed(bps){ const bits=bps*8; return bits<1e6 ? (bits/1e3).toFixed(0)+" Kbps" : (bits/1e6).toFixed(2)+" Mbps"; }
 function fmtDur(s){ const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); return (d?d+"天":"")+(h?h+"时":"")+m+"分"; }
-let last=null, lastT=0;
+let lastNet=null, lastT=0;
 async function tick(){
   try{
     const r = await fetch("/api/stats"); const s = await r.json();
@@ -43,17 +45,18 @@ async function tick(){
     document.getElementById("hosts").textContent = s.hosts;
     document.getElementById("sessions").textContent = s.sessions;
     document.getElementById("total").textContent = s.total_sessions;
-    if(s.relay_available){
-      document.getElementById("relay-total").textContent = fmtBytes(s.relay_bytes_total);
+    // server NIC throughput (real-time speed) + session/historical bytes
+    if(s.net_bytes_total!=null){
       const now=Date.now();
-      if(last!=null){ const dt=(now-lastT)/1000; const d=s.relay_bytes_total-last; document.getElementById("relay-speed").textContent = dt>0? fmtSpeed(Math.max(0,d)/dt):"--"; }
-      last=s.relay_bytes_total; lastT=now;
-      document.getElementById("relay-note").innerHTML='TURN 中继已启用。<span class="ok">仅在直连失败、走中继时才产生服务器流量。</span>';
-    } else {
-      document.getElementById("relay-speed").textContent="无中继";
-      document.getElementById("relay-total").textContent="无中继";
-      document.getElementById("relay-note").innerHTML='<span class="off">未检测到 TURN 中继指标</span>(未启用 TURN 或 coturn 未开 Prometheus)。所有会话走 P2P 直连,服务器几乎不耗流量。';
+      if(lastNet!=null){ const dt=(now-lastT)/1000; const d=s.net_bytes_total-lastNet; document.getElementById("net-speed").textContent = dt>0? fmtSpeed(Math.max(0,d)/dt):"--"; }
+      lastNet=s.net_bytes_total; lastT=now;
+      document.getElementById("net-session").textContent = fmtBytes(s.net_bytes_session);
+      document.getElementById("net-total").textContent = fmtBytes(s.net_bytes_total);
     }
+    document.getElementById("relay-total").textContent = s.relay_available ? fmtBytes(s.relay_bytes_total) : "未启用/无数据";
+    document.getElementById("relay-note").innerHTML = s.relay_available
+      ? 'TURN 中继已启用。<span class="ok">仅在直连失败、走中继时才产生中继流量;能直连时服务器几乎不耗流量。</span>'
+      : '所有会话走 P2P 直连,服务器几乎不耗流量;启用 TURN 后中继流量会计入上方网卡统计。';
   }catch(e){}
 }
 tick(); setInterval(tick, 1000);
