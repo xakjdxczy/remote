@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RemoteDesk · 服务器状态</title>
+<style>
+  body { margin:0; font-family: system-ui,"PingFang SC","Microsoft YaHei",sans-serif; background:#0b1022; color:#e9edf7; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 40px 20px; }
+  h1 { font-size: 22px; }
+  .sub { color:#9aa6c4; font-size:13px; margin-bottom:24px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap:14px; }
+  .card { background:#141b34; border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:18px; }
+  .card label { display:block; color:#9aa6c4; font-size:12px; margin-bottom:6px; }
+  .card b { font-size:24px; font-variant-numeric: tabular-nums; }
+  .note { color:#63708f; font-size:12px; margin-top:20px; line-height:1.7; }
+  .ok { color:#22e6c8; } .off { color:#ff9d5c; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>RemoteDesk 服务器状态</h1>
+  <p class="sub">信令服务器本身不转发画面(P2P);服务器侧的数据流量来自 <b>TURN 中继</b>。</p>
+  <div class="grid">
+    <div class="card"><label>运行时长</label><b id="uptime">--</b></div>
+    <div class="card"><label>在线被控端</label><b id="hosts">--</b></div>
+    <div class="card"><label>当前会话</label><b id="sessions">--</b></div>
+    <div class="card"><label>累计会话</label><b id="total">--</b></div>
+    <div class="card"><label>服务器实时网速</label><b id="net-speed" class="ok">--</b></div>
+    <div class="card"><label>本次流量(自启动)</label><b id="net-session">--</b></div>
+    <div class="card"><label>历史流量(自开机)</label><b id="net-total">--</b></div>
+    <div class="card"><label>TURN 中继累计</label><b id="relay-total">--</b></div>
+  </div>
+  <p class="note" id="relay-note"></p>
+</div>
+<script>
+function fmtBytes(n){ if(n==null) return "--"; if(n<1024) return n+" B"; if(n<1048576) return (n/1024).toFixed(1)+" KB"; if(n<1073741824) return (n/1048576).toFixed(1)+" MB"; return (n/1073741824).toFixed(2)+" GB"; }
+function fmtSpeed(bps){ const bits=bps*8; return bits<1e6 ? (bits/1e3).toFixed(0)+" Kbps" : (bits/1e6).toFixed(2)+" Mbps"; }
+function fmtDur(s){ const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); return (d?d+"天":"")+(h?h+"时":"")+m+"分"; }
+let lastNet=null, lastT=0;
+async function tick(){
+  try{
+    const r = await fetch("/api/stats"); const s = await r.json();
+    document.getElementById("uptime").textContent = fmtDur(s.uptime_sec);
+    document.getElementById("hosts").textContent = s.hosts;
+    document.getElementById("sessions").textContent = s.sessions;
+    document.getElementById("total").textContent = s.total_sessions;
+    // server NIC throughput (real-time speed) + session/historical bytes
+    if(s.net_bytes_total!=null){
+      const now=Date.now();
+      if(lastNet!=null){ const dt=(now-lastT)/1000; const d=s.net_bytes_total-lastNet; document.getElementById("net-speed").textContent = dt>0? fmtSpeed(Math.max(0,d)/dt):"--"; }
+      lastNet=s.net_bytes_total; lastT=now;
+      document.getElementById("net-session").textContent = fmtBytes(s.net_bytes_session);
+      document.getElementById("net-total").textContent = fmtBytes(s.net_bytes_total);
+    }
+    document.getElementById("relay-total").textContent = s.relay_available ? fmtBytes(s.relay_bytes_total) : "未启用/无数据";
+    document.getElementById("relay-note").innerHTML = s.relay_available
+      ? 'TURN 中继已启用。<span class="ok">仅在直连失败、走中继时才产生中继流量;能直连时服务器几乎不耗流量。</span>'
+      : '所有会话走 P2P 直连,服务器几乎不耗流量;启用 TURN 后中继流量会计入上方网卡统计。';
+  }catch(e){}
+}
+tick(); setInterval(tick, 1000);
+</script>
+</body>
+</html>

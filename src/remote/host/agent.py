@@ -15,12 +15,43 @@ from remote.host.capture import now_ms, open_frame_source
 from remote.host.files import FileInbox
 from remote.host.webrtc import HostPeer
 from remote.ids import format_device_id, generate_temp_password
-from remote.protocol import decode_json, encode_json, pack_frame, peek_binary_type, unpack_file_chunk, BinaryType
+from remote.protocol import decode_json, encode_json, peek_binary_type, unpack_file_chunk, BinaryType
 
 logger = logging.getLogger("remotedesk.host")
 
 CONFIG_DIR = Path.home() / ".remotedesk"
 CONFIG_PATH = CONFIG_DIR / "device.json"
+TRAFFIC_PATH = CONFIG_DIR / "traffic.json"
+
+
+def _fmt_bytes(n: float) -> str:
+    if n < 1024:
+        return f"{int(n)} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 * 1024 * 1024:
+        return f"{n / 1024 / 1024:.1f} MB"
+    return f"{n / 1024 / 1024 / 1024:.2f} GB"
+
+
+def _fmt_speed(bytes_per_sec: float) -> str:
+    bits = bytes_per_sec * 8
+    return f"{bits / 1e3:.0f} Kbps" if bits < 1e6 else f"{bits / 1e6:.2f} Mbps"
+
+
+def load_traffic_total() -> int:
+    try:
+        return int(json.loads(TRAFFIC_PATH.read_text(encoding="utf-8")).get("total_bytes", 0))
+    except Exception:
+        return 0
+
+
+def save_traffic_total(total: int) -> None:
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        TRAFFIC_PATH.write_text(json.dumps({"total_bytes": int(total)}), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def load_device_config() -> dict:
@@ -84,6 +115,7 @@ class HostAgent:
         self._ws = None
         self._send_lock = asyncio.Lock()
         self._peer: HostPeer | None = None
+        self._traffic_total = load_traffic_total()
 
     async def run_forever(self) -> None:
         while not self._stop.is_set():
@@ -133,8 +165,8 @@ class HostAgent:
 
             tasks = [
                 asyncio.create_task(self._consume(ws), name="consume"),
-                asyncio.create_task(self._produce(ws), name="produce"),
                 asyncio.create_task(self._heartbeat(ws), name="heartbeat"),
+                asyncio.create_task(self._stats_loop(), name="stats"),
                 asyncio.create_task(self._stop.wait(), name="stopper"),
             ]
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -157,15 +189,38 @@ class HostAgent:
             await asyncio.sleep(15)
             await self._send(ws, encode_json({"type": "ping", "t": now_ms()}))
 
-    async def _produce(self, ws) -> None:
-        interval = 1 / self.fps
+    async def _stats_loop(self) -> None:
+        import time
+
+        last_bytes = 0
+        last_t = time.time()
         while True:
+            await asyncio.sleep(2)
             peer = self._peer
-            if peer and peer.is_open:
-                jpeg = await asyncio.to_thread(self.source.grab_jpeg, self.quality)
-                payload = pack_frame(jpeg, self.source.width, self.source.height, now_ms())
-                peer.send(payload)
-            await asyncio.sleep(interval)
+            if not peer or not peer.pc:
+                last_bytes = 0
+                continue
+            try:
+                report = await peer.pc.getStats()
+            except Exception:
+                continue
+            total = 0
+            for stat in report.values():
+                if getattr(stat, "type", None) in ("outbound-rtp", "data-channel"):
+                    total += getattr(stat, "bytesSent", 0) or 0
+            now = time.time()
+            if last_bytes and total >= last_bytes:
+                delta = total - last_bytes
+                dt = now - last_t
+                self._traffic_total += delta
+                save_traffic_total(self._traffic_total)
+                speed = delta / dt if dt > 0 else 0
+                print(
+                    f"  [流量] 上行 {_fmt_speed(speed)} · 本次 {_fmt_bytes(total)} · 历史 {_fmt_bytes(self._traffic_total)}",
+                    flush=True,
+                )
+            last_bytes = total
+            last_t = now
 
     async def _consume(self, ws) -> None:
         async for raw in ws:
@@ -196,7 +251,13 @@ class HostAgent:
         async def send_signal(payload: dict) -> None:
             await self._send(ws, encode_json(payload))
 
-        self._peer = HostPeer(send_signal, self._on_session_payload, on_open=self._on_p2p_open)
+        self._peer = HostPeer(
+            send_signal,
+            self._on_session_payload,
+            on_open=self._on_p2p_open,
+            source=self.source,
+            fps=self.fps,
+        )
 
     def _on_p2p_open(self) -> None:
         if not self._peer:

@@ -139,7 +139,7 @@ class AndroidAdbSource:
         return (1080, 1920)
 
     # -- capture -------------------------------------------------------------
-    def grab_jpeg(self, quality: int = 70) -> bytes:
+    def grab_image(self):
         png = self._run(["exec-out", "screencap", "-p"], True)
         img = self._Image.open(io.BytesIO(png)).convert("RGB")
         self.device_w, self.device_h = img.size
@@ -147,8 +147,11 @@ class AndroidAdbSource:
             ratio = self._max_width / img.width
             img = img.resize((self._max_width, max(1, int(img.height * ratio))))
         self.width, self.height = img.size
+        return img
+
+    def grab_jpeg(self, quality: int = 70) -> bytes:
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        self.grab_image().save(buf, format="JPEG", quality=quality, optimize=True)
         return buf.getvalue()
 
     # -- coordinate mapping --------------------------------------------------

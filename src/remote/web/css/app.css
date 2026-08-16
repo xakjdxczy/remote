@@ -117,6 +117,8 @@ input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(47,128,23
   background: #111;
   cursor: none;
   outline: none;
+  display: block;
+  object-fit: contain;
 }
 .stage-hint { color: #8ea0b8; font-size: 12px; margin-top: 10px; }
 .session-meta { display: flex; gap: 14px; align-items: center; color: var(--muted); font-size: 13px; }

@@ -92,6 +92,11 @@ class VirtualDesktop:
             self.keys_down.discard(key)
 
     def render_jpeg(self, quality: int = 70) -> bytes:
+        buf = io.BytesIO()
+        self.render_image().save(buf, format="JPEG", quality=quality, optimize=True)
+        return buf.getvalue()
+
+    def render_image(self) -> "Image.Image":
         img = Image.new("RGB", (self.width, self.height), (18, 36, 68))
         draw = ImageDraw.Draw(img)
         font = ImageFont.load_default()
@@ -135,9 +140,7 @@ class VirtualDesktop:
         # Cursor
         self._draw_cursor(draw, self.cursor_x, self.cursor_y)
 
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=quality, optimize=True)
-        return buf.getvalue()
+        return img
 
     def _draw_window(self, draw: ImageDraw.ImageDraw, win: Window, font, focused: bool) -> None:
         shadow = (0, 0, 0)
