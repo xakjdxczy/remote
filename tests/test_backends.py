@@ -114,6 +114,14 @@ def test_desktop_grab_downscales_wide_screen():
     assert src.height == 720
 
 
+def test_desktop_caps_height_to_720p():
+    # A tall/portrait monitor must still be capped to <=720 in height.
+    src = _desktop({"left": 0, "top": 0, "width": 1000, "height": 2000}, max_width=1280, max_height=720)
+    src.grab_jpeg()
+    assert src.height <= 720
+    assert src.width <= 1280
+
+
 def test_desktop_coordinate_mapping_with_offset_and_scale():
     # 2560x1440 logical, displayed at 1280x720 -> factor 2, plus a monitor offset.
     src = _desktop({"left": 100, "top": 50, "width": 2560, "height": 1440}, max_width=1280)

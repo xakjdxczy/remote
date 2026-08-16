@@ -6,7 +6,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from remote.p2p import rtc_configuration, strip_relay_sdp, wait_ice_complete
+from remote.p2p import maybe_strip_relay, rtc_configuration, wait_ice_complete
 
 logger = logging.getLogger("remotedesk.host.webrtc")
 
@@ -89,7 +89,7 @@ class HostPeer:
                 {
                     "type": "signal",
                     "kind": "answer",
-                    "sdp": {"type": local.type, "sdp": strip_relay_sdp(local.sdp)},
+                    "sdp": {"type": local.type, "sdp": maybe_strip_relay(local.sdp)},
                 }
             )
         elif kind == "failed":

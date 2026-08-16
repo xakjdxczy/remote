@@ -236,6 +236,10 @@ class HostAgent:
         elif kind == "file_done":
             path = self.inbox.finish(int(msg["id"]))
             logger.info("file saved: %s", path)
+        elif kind == "conn_info":
+            method = "TURN 中继（经服务器转发）" if msg.get("method") == "relay" else "P2P 直连"
+            print(f"  [连接方式] {method}", flush=True)
+            logger.info("connection method: %s", msg.get("method"))
         elif kind == "chat":
             print(f"  [聊天] {msg.get('from', 'viewer')}: {msg.get('text')}", flush=True)
         elif kind == "ping":
