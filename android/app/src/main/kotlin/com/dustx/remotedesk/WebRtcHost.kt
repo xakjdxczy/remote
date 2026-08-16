@@ -6,27 +6,32 @@ import android.os.Looper
 import android.util.Log
 import org.json.JSONObject
 import org.webrtc.DataChannel
+import org.webrtc.DefaultVideoDecoderFactory
+import org.webrtc.DefaultVideoEncoderFactory
+import org.webrtc.EglBase
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RTCStatsCollectorCallback
 import org.webrtc.RtpReceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
+import org.webrtc.VideoTrack
 import java.nio.ByteBuffer
 import kotlin.math.abs
 
 /**
- * Native WebRTC host peer. Mirrors the Python aiortc host: it answers the
- * viewer's offer, receives the "session" DataChannel, streams JPEG frames on it
- * and applies input events. Non-trickle ICE (candidates are gathered then the
- * full SDP is sent), matching the web viewer.
+ * Native WebRTC host peer. Answers the viewer's offer, attaches the screen as a
+ * real **WebRTC video track** (VP8/H264, hardware-encoded), receives the
+ * "session" DataChannel and applies input events. Non-trickle ICE.
  */
 class WebRtcHost(
     private val appContext: Context,
     private val signaling: SignalingClient,
     private val iceServers: List<PeerConnection.IceServer>,
+    private val videoTrack: VideoTrack?,
     private val reportedW: Int,
     private val reportedH: Int,
     private val deviceW: Int,
@@ -42,11 +47,10 @@ class WebRtcHost(
     val isOpen: Boolean get() = dc?.state() == DataChannel.State.OPEN
 
     fun start() {
-        ensureFactory(appContext)
         val config = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
-        pc = factory!!.createPeerConnection(config, pcObserver)
+        pc = ensureFactory(appContext).createPeerConnection(config, pcObserver)
     }
 
     fun onSignal(msg: JSONObject) {
@@ -56,14 +60,20 @@ class WebRtcHost(
         }
     }
 
+    fun stats(cb: RTCStatsCollectorCallback) {
+        pc?.getStats(cb)
+    }
+
     private fun handleOffer(sdp: String) {
         val peer = pc ?: return
         peer.setRemoteDescription(object : SimpleSdp() {
             override fun onSetSuccess() {
+                if (videoTrack != null) {
+                    try { peer.addTrack(videoTrack, listOf("rd-stream")) } catch (e: Exception) { Log.w(TAG, "addTrack: ${e.message}") }
+                }
                 peer.createAnswer(object : SimpleSdp() {
                     override fun onCreateSuccess(desc: SessionDescription) {
                         peer.setLocalDescription(SimpleSdp(), desc)
-                        // Fallback: send answer even if gathering does not report COMPLETE.
                         main.postDelayed({ trySendAnswer() }, 2500)
                     }
                 }, MediaConstraints())
@@ -81,12 +91,6 @@ class WebRtcHost(
             .put("sdp", JSONObject().put("type", "answer").put("sdp", local.description))
         signaling.send(out)
         Log.i(TAG, "answer sent")
-    }
-
-    fun sendFrame(bytes: ByteArray) {
-        val channel = dc ?: return
-        if (channel.state() != DataChannel.State.OPEN) return
-        channel.send(DataChannel.Buffer(ByteBuffer.wrap(bytes), true))
     }
 
     private fun sendJson(obj: JSONObject) {
@@ -130,7 +134,7 @@ class WebRtcHost(
         override fun onBufferedAmountChange(previousAmount: Long) {}
         override fun onStateChange() {
             if (dc?.state() == DataChannel.State.OPEN) {
-                HostState.set(status = "P2P 直连中（对方正在控制）")
+                HostState.set(status = "被控中")
                 sendJson(
                     JSONObject().put("type", "screen_info")
                         .put("width", reportedW).put("height", reportedH).put("backend", "android")
@@ -138,7 +142,7 @@ class WebRtcHost(
             }
         }
         override fun onMessage(buffer: DataChannel.Buffer) {
-            if (buffer.binary) return // file chunks not handled on mobile host
+            if (buffer.binary) return
             val arr = ByteArray(buffer.data.remaining())
             buffer.data.get(arr)
             val msg = try { JSONObject(String(arr, Charsets.UTF_8)) } catch (e: Exception) { return }
@@ -146,8 +150,8 @@ class WebRtcHost(
                 "input" -> handleInput(msg)
                 "ping" -> sendJson(JSONObject().put("type", "pong").put("t", msg.opt("t")))
                 "conn_info" -> {
-                    val m = if (msg.optString("method") == "relay") "TURN 中继（经服务器转发）" else "P2P 直连"
-                    HostState.set(status = "被控中 · $m")
+                    HostState.connMethod = if (msg.optString("method") == "relay") "TURN 中继" else "P2P 直连"
+                    HostState.set()
                 }
             }
         }
@@ -182,16 +186,30 @@ class WebRtcHost(
     companion object {
         private const val TAG = "RD.WebRTC"
         @Volatile private var factory: PeerConnectionFactory? = null
+        @Volatile private var eglBase: EglBase? = null
 
         @Synchronized
-        private fun ensureFactory(context: Context) {
-            if (factory != null) return
-            PeerConnectionFactory.initialize(
-                PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
-                    .createInitializationOptions()
-            )
-            factory = PeerConnectionFactory.builder().createPeerConnectionFactory()
+        fun ensureFactory(context: Context): PeerConnectionFactory {
+            var f = factory
+            if (f == null) {
+                PeerConnectionFactory.initialize(
+                    PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
+                        .createInitializationOptions()
+                )
+                val egl = EglBase.create()
+                eglBase = egl
+                val enc = DefaultVideoEncoderFactory(egl.eglBaseContext, true, true)
+                val dec = DefaultVideoDecoderFactory(egl.eglBaseContext)
+                f = PeerConnectionFactory.builder()
+                    .setVideoEncoderFactory(enc)
+                    .setVideoDecoderFactory(dec)
+                    .createPeerConnectionFactory()
+                factory = f
+            }
+            return f!!
         }
+
+        fun egl(): EglBase = eglBase!!
     }
 }
 

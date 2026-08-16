@@ -69,6 +69,12 @@ class MainActivity : AppCompatActivity() {
         statusView.text = HostState.status
         deviceIdView.text = Ids.formatId(HostState.deviceId)
         passwordView.text = HostState.password?.ifEmpty { "——————" } ?: "——————"
+        findViewById<TextView>(R.id.stat_method).text = "连接方式：${HostState.connMethod ?: "--"}"
+        findViewById<TextView>(R.id.stat_speed).text = "实时网速：${HostState.netSpeed}"
+        findViewById<TextView>(R.id.stat_session).text = "本次流量：${HostState.fmtBytes(HostState.sessionBytes)}"
+        findViewById<TextView>(R.id.stat_total).text = "历史流量：${HostState.fmtBytes(HostState.totalBytes)}"
+        findViewById<TextView>(R.id.stat_latency).text =
+            "延迟：" + (if (HostState.latencyMs >= 0) "${HostState.latencyMs} ms" else "-- ms")
     }
 
     override fun onResume() {

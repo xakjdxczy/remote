@@ -7,13 +7,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.graphics.Bitmap
-import android.graphics.PixelFormat
-import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
-import android.media.ImageReader
 import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -25,28 +19,39 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import org.webrtc.PeerConnection
-import java.io.ByteArrayOutputStream
+import org.webrtc.RTCStatsCollectorCallback
+import org.webrtc.ScreenCapturerAndroid
+import org.webrtc.SurfaceTextureHelper
+import org.webrtc.VideoSource
+import org.webrtc.VideoTrack
 
-/** Foreground service: screen capture via MediaProjection + signaling + WebRTC. */
+/**
+ * Foreground service: captures the screen as a WebRTC video track
+ * (ScreenCapturerAndroid + hardware encoder) and runs signaling + the peer.
+ * Traffic (speed / session / historical) and latency come from getStats().
+ */
 class ScreenCaptureService : Service(), SignalingClient.Callbacks {
 
-    private var projection: MediaProjection? = null
-    private var virtualDisplay: VirtualDisplay? = null
-    private var imageReader: ImageReader? = null
-    private var captureThread: HandlerThread? = null
-    private var captureHandler: Handler? = null
+    private var capturer: ScreenCapturerAndroid? = null
+    private var videoSource: VideoSource? = null
+    private var videoTrack: VideoTrack? = null
+    private var surfaceHelper: SurfaceTextureHelper? = null
 
     private var signaling: SignalingClient? = null
     private var host: WebRtcHost? = null
+
+    private var statsThread: HandlerThread? = null
+    private var statsHandler: Handler? = null
 
     private var deviceW = 0
     private var deviceH = 0
     private var capW = 0
     private var capH = 0
-    private var densityDpi = 320
+    private val fps = 30
+
     private var lastSent = 0L
-    private val frameIntervalMs = 80L // ~12fps
-    private val quality = 45
+    private var lastAt = 0L
+    private var totalPersisted = 0L
 
     private val stunUrls = listOf(
         "stun:stun.l.google.com:19302",
@@ -59,7 +64,6 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
     private fun defaultIceServers(): List<PeerConnection.IceServer> =
         listOf(PeerConnection.IceServer.builder(stunUrls).createIceServer())
 
-    /** Fetch ice_servers (incl. optional TURN) from the signaling server's /api/config. */
     private fun fetchIceServers(wsUrl: String): List<PeerConnection.IceServer> {
         return try {
             val base = wsUrl.replace("wss://", "https://").replace("ws://", "http://").removeSuffix("/ws")
@@ -93,21 +97,17 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
         if (intent == null) { stopSelf(); return START_NOT_STICKY }
         startForegroundInternal()
 
-        val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
         val data = intent.getParcelableExtra<Intent>(EXTRA_DATA)
         val url = intent.getStringExtra(EXTRA_URL) ?: DEFAULT_URL
         if (data == null) { stopSelf(); return START_NOT_STICKY }
 
+        totalPersisted = getSharedPreferences("rd_traffic", Context.MODE_PRIVATE).getLong("total_bytes", 0L)
         computeDimensions()
-        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        projection = mpm.getMediaProjection(resultCode, data)
-        projection?.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() { stopSelf() }
-        }, Handler(mainLooper))
 
         Thread { iceServers = fetchIceServers(url) }.start()
-        startCapture()
+        startVideoCapture(data)
         startSignaling(url)
+        startStatsLoop()
         HostState.set(status = "正在连接信令…")
         return START_STICKY
     }
@@ -116,62 +116,79 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
         val dm: DisplayMetrics = resources.displayMetrics
         deviceW = dm.widthPixels
         deviceH = dm.heightPixels
-        densityDpi = dm.densityDpi
         val maxW = 720
-        if (deviceW <= maxW) {
-            capW = deviceW; capH = deviceH
-        } else {
-            capW = maxW
-            capH = (deviceH.toLong() * maxW / deviceW).toInt()
-        }
+        if (deviceW <= maxW) { capW = deviceW; capH = deviceH }
+        else { capW = maxW; capH = (deviceH.toLong() * maxW / deviceW).toInt() }
         if (capW % 2 == 1) capW -= 1
         if (capH % 2 == 1) capH -= 1
     }
 
-    private fun startCapture() {
-        captureThread = HandlerThread("rd-capture").also { it.start() }
-        captureHandler = Handler(captureThread!!.looper)
-        imageReader = ImageReader.newInstance(capW, capH, PixelFormat.RGBA_8888, 2)
-        virtualDisplay = projection?.createVirtualDisplay(
-            "rd-cap", capW, capH, densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader!!.surface, null, captureHandler
-        )
-        imageReader!!.setOnImageAvailableListener({ reader -> onFrame(reader) }, captureHandler)
-    }
-
-    private fun onFrame(reader: ImageReader) {
-        val image = reader.acquireLatestImage() ?: return
-        try {
-            val now = System.currentTimeMillis()
-            val h = host
-            if (h == null || !h.isOpen || now - lastSent < frameIntervalMs) return
-            lastSent = now
-            val plane = image.planes[0]
-            val buffer = plane.buffer
-            val pixelStride = plane.pixelStride
-            val rowStride = plane.rowStride
-            val rowPadding = rowStride - pixelStride * capW
-            val bmpW = capW + rowPadding / pixelStride
-            val bmp = Bitmap.createBitmap(bmpW, capH, Bitmap.Config.ARGB_8888)
-            bmp.copyPixelsFromBuffer(buffer)
-            val out = if (bmpW != capW) Bitmap.createBitmap(bmp, 0, 0, capW, capH) else bmp
-            val baos = ByteArrayOutputStream()
-            out.compress(Bitmap.CompressFormat.JPEG, quality, baos)
-            if (out !== bmp) out.recycle()
-            bmp.recycle()
-            h.sendFrame(Protocol.packFrame(baos.toByteArray(), capW, capH, now))
-        } catch (e: Exception) {
-            Log.w(TAG, "frame error: ${e.message}")
-        } finally {
-            image.close()
-        }
+    private fun startVideoCapture(data: Intent) {
+        val factory = WebRtcHost.ensureFactory(applicationContext)
+        val egl = WebRtcHost.egl()
+        val cap = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
+            override fun onStop() { stopSelf() }
+        })
+        capturer = cap
+        val src = factory.createVideoSource(true) // isScreencast
+        videoSource = src
+        surfaceHelper = SurfaceTextureHelper.create("rd-capture", egl.eglBaseContext)
+        cap.initialize(surfaceHelper, applicationContext, src.capturerObserver)
+        cap.startCapture(capW, capH, fps)
+        videoTrack = factory.createVideoTrack("screen", src)
     }
 
     private fun startSignaling(url: String) {
         val sig = SignalingClient(url, Build.MODEL ?: "Android", "Android ${Build.VERSION.RELEASE}", this)
         signaling = sig
         sig.connect()
+    }
+
+    private fun startStatsLoop() {
+        statsThread = HandlerThread("rd-stats").also { it.start() }
+        statsHandler = Handler(statsThread!!.looper)
+        statsHandler?.postDelayed(object : Runnable {
+            override fun run() {
+                val h = host
+                if (h != null) h.stats(statsCallback)
+                statsHandler?.postDelayed(this, 1500)
+            }
+        }, 1500)
+    }
+
+    private val statsCallback = RTCStatsCollectorCallback { report ->
+        var sent = 0L
+        var rttMs = -1
+        for (s in report.statsMap.values) {
+            when (s.type) {
+                "outbound-rtp", "data-channel" -> {
+                    (s.members["bytesSent"] as? Number)?.let { sent += it.toLong() }
+                }
+                "candidate-pair" -> {
+                    val nominated = (s.members["nominated"] as? Boolean) ?: false
+                    if (nominated) {
+                        (s.members["currentRoundTripTime"] as? Number)?.let { rttMs = (it.toDouble() * 1000).toInt() }
+                    }
+                }
+            }
+        }
+        val now = System.currentTimeMillis()
+        if (lastSent > 0 && sent >= lastSent) {
+            val dt = (now - lastAt) / 1000.0
+            val delta = sent - lastSent
+            totalPersisted += delta
+            getSharedPreferences("rd_traffic", Context.MODE_PRIVATE).edit()
+                .putLong("total_bytes", totalPersisted).apply()
+            val speed = if (dt > 0) (delta / dt) else 0.0
+            HostState.setStats(fmtSpeed(speed), sent, totalPersisted, rttMs)
+        }
+        lastSent = sent
+        lastAt = now
+    }
+
+    private fun fmtSpeed(bytesPerSec: Double): String {
+        val bits = bytesPerSec * 8
+        return if (bits < 1e6) String.format("%.0f Kbps", bits / 1e3) else String.format("%.2f Mbps", bits / 1e6)
     }
 
     // ---- SignalingClient.Callbacks --------------------------------------
@@ -181,30 +198,26 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
 
     override fun onSessionStart(msg: JSONObject) {
         host?.close()
-        val h = WebRtcHost(applicationContext, signaling!!, iceServers, capW, capH, deviceW, deviceH)
+        lastSent = 0
+        val h = WebRtcHost(applicationContext, signaling!!, iceServers, videoTrack, capW, capH, deviceW, deviceH)
         host = h
         h.start()
         HostState.set(status = "有人接入，正在建立 P2P…")
     }
 
-    override fun onSignal(msg: JSONObject) {
-        host?.onSignal(msg)
-    }
+    override fun onSignal(msg: JSONObject) { host?.onSignal(msg) }
 
     override fun onSessionEnd(reason: String) {
         host?.close(); host = null
         HostState.set(status = "在线，等待连接")
     }
 
-    override fun onClosed() {
-        HostState.set(status = "信令断开")
-    }
+    override fun onClosed() { HostState.set(status = "信令断开") }
 
     private fun startForegroundInternal() {
         val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL, "远程被控", NotificationManager.IMPORTANCE_LOW)
-            mgr.createNotificationChannel(ch)
+            mgr.createNotificationChannel(NotificationChannel(CHANNEL, "远程被控", NotificationManager.IMPORTANCE_LOW))
         }
         val notif: Notification = Notification.Builder(this, CHANNEL)
             .setContentTitle("尘埃X 远程被控运行中")
@@ -220,12 +233,13 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
     }
 
     override fun onDestroy() {
+        try { statsThread?.quitSafely() } catch (_: Exception) {}
         try { signaling?.close() } catch (_: Exception) {}
         try { host?.close() } catch (_: Exception) {}
-        try { virtualDisplay?.release() } catch (_: Exception) {}
-        try { imageReader?.close() } catch (_: Exception) {}
-        try { projection?.stop() } catch (_: Exception) {}
-        captureThread?.quitSafely()
+        try { capturer?.stopCapture() } catch (_: Exception) {}
+        try { capturer?.dispose() } catch (_: Exception) {}
+        try { videoSource?.dispose() } catch (_: Exception) {}
+        try { surfaceHelper?.dispose() } catch (_: Exception) {}
         HostState.set(status = "未连接", deviceId = "", password = "")
         super.onDestroy()
     }

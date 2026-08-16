@@ -7,6 +7,13 @@ object HostState {
     @Volatile var status: String = "未连接"
     @Volatile var deviceId: String? = null
     @Volatile var password: String? = null
+    @Volatile var connMethod: String? = null
+
+    // live traffic/latency stats
+    @Volatile var netSpeed: String = "--"
+    @Volatile var sessionBytes: Long = 0
+    @Volatile var totalBytes: Long = 0
+    @Volatile var latencyMs: Int = -1
 
     @Volatile var listener: (() -> Unit)? = null
 
@@ -15,6 +22,21 @@ object HostState {
         if (deviceId != null) this.deviceId = deviceId
         if (password != null) this.password = password
         listener?.invoke()
+    }
+
+    fun setStats(speed: String, session: Long, total: Long, latency: Int) {
+        netSpeed = speed
+        sessionBytes = session
+        totalBytes = total
+        latencyMs = latency
+        listener?.invoke()
+    }
+
+    fun fmtBytes(n: Long): String = when {
+        n < 1024 -> "$n B"
+        n < 1024 * 1024 -> String.format("%.1f KB", n / 1024.0)
+        n < 1024L * 1024 * 1024 -> String.format("%.1f MB", n / 1024.0 / 1024)
+        else -> String.format("%.2f GB", n / 1024.0 / 1024 / 1024)
     }
 }
 
