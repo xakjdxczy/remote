@@ -67,6 +67,7 @@ class DesktopSource:
         self,
         *,
         max_width: int = 1280,
+        max_height: int = 720,
         grabber: Any | None = None,
         monitor: dict | None = None,
         mouse: Any | None = None,
@@ -75,7 +76,10 @@ class DesktopSource:
         from PIL import Image  # local import keeps import errors actionable
 
         self._Image = Image
-        self._max_width = max_width
+        # Hard cap at 720p (1280x720). Higher resolutions are intentionally
+        # disallowed to keep bandwidth predictable, especially over TURN.
+        self._max_width = min(max_width, 1280)
+        self._max_height = min(max_height, 720)
         self._platform = sys.platform
 
         if grabber is None:
@@ -131,6 +135,9 @@ class DesktopSource:
         if img.width > self._max_width:
             ratio = self._max_width / img.width
             img = img.resize((self._max_width, max(1, int(img.height * ratio))))
+        if img.height > self._max_height:
+            ratio = self._max_height / img.height
+            img = img.resize((max(1, int(img.width * ratio)), self._max_height))
         self.width, self.height = img.size
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=quality, optimize=True)

@@ -13,6 +13,8 @@ const state = {
   lastPing: 0,
   transferSeq: 1,
   iceServers: [],
+  relayEnabled: false,
+  connMethod: null,
 };
 
 function wsUrl() {
@@ -71,6 +73,43 @@ function stripRelaySdp(sdp) {
     .join("\r\n") + "\r\n";
 }
 
+// Keep relay candidates only when a TURN server is configured; otherwise stay pure P2P.
+function maybeStripRelay(sdp) {
+  return state.relayEnabled ? sdp : stripRelaySdp(sdp);
+}
+
+// Inspect the negotiated ICE candidate pair to report P2P-direct vs TURN-relay.
+async function detectConnType() {
+  if (!state.pc) return;
+  try {
+    const stats = await state.pc.getStats();
+    let pairId = null;
+    let sel = null;
+    stats.forEach((r) => { if (r.type === "transport" && r.selectedCandidatePairId) pairId = r.selectedCandidatePairId; });
+    stats.forEach((r) => {
+      if (r.type === "candidate-pair" && ((pairId && r.id === pairId) || (!pairId && r.selected))) sel = r;
+    });
+    if (!sel) stats.forEach((r) => { if (r.type === "candidate-pair" && r.state === "succeeded" && r.nominated) sel = r; });
+    let method = "p2p";
+    if (sel) {
+      let local = null; let remote = null;
+      stats.forEach((r) => { if (r.id === sel.localCandidateId) local = r; if (r.id === sel.remoteCandidateId) remote = r; });
+      if ((local && local.candidateType === "relay") || (remote && remote.candidateType === "relay")) method = "relay";
+    }
+    applyConnMethod(method);
+  } catch { /* ignore */ }
+}
+
+function applyConnMethod(method) {
+  if (state.connMethod === method) return;
+  state.connMethod = method;
+  const relay = method === "relay";
+  setStatus(relay ? "TURN 中继" : "P2P 直连", "busy");
+  if ($("stat-path")) $("stat-path").textContent = relay ? "TURN 中继" : "P2P 直连";
+  addChat("系统", relay ? "当前走 TURN 中继（经服务器转发）" : "当前 P2P 直连（不经服务器）");
+  sendSession({ type: "conn_info", method });
+}
+
 function waitGathering(pc, ms = 8000) {
   if (pc.iceGatheringState === "complete") return Promise.resolve();
   return new Promise((resolve) => {
@@ -88,6 +127,9 @@ async function loadConfig() {
   const res = await fetch("/api/config");
   const cfg = await res.json();
   state.iceServers = cfg.ice_servers || [];
+  state.relayEnabled = state.iceServers.some((s) =>
+    (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => String(u).startsWith("turn:") || String(u).startsWith("turns:")),
+  );
   if (cfg.demo_host) {
     $("local-id").textContent = cfg.demo_host.device_id_display;
     $("local-pass").textContent = cfg.demo_host.password;
@@ -190,9 +232,12 @@ async function startP2P(session) {
   dc.addEventListener("message", (ev) => onSessionMessage(ev.data));
   dc.addEventListener("open", () => {
     state.p2pReady = true;
-    setStatus("P2P 直连", "busy");
-    if ($("stat-path")) $("stat-path").textContent = "P2P";
-    addChat("系统", "P2P 已接通，画面和键鼠不再经过信令服务器");
+    state.connMethod = null;
+    setStatus("已连接", "busy");
+    addChat("系统", "通道已接通，正在判定连接方式…");
+    setTimeout(detectConnType, 600);
+    setTimeout(detectConnType, 1800);
+    setTimeout(detectConnType, 3500);
   });
   dc.addEventListener("close", () => {
     if (state.session) endSession("P2P 通道已关闭");
@@ -210,7 +255,7 @@ async function startP2P(session) {
   sendSignal({
     type: "signal",
     kind: "offer",
-    sdp: { type: pc.localDescription.type, sdp: stripRelaySdp(pc.localDescription.sdp) },
+    sdp: { type: pc.localDescription.type, sdp: maybeStripRelay(pc.localDescription.sdp) },
   });
 }
 
