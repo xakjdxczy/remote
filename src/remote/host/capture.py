@@ -1,13 +1,26 @@
-"""Screen capture with real display fallback to the virtual desktop."""
+"""Frame source selection: desktop / android / virtual backends.
+
+A *frame source* both produces JPEG frames and consumes viewer input, so the
+host agent stays backend-agnostic. Backends:
+
+* ``desktop`` – real screen on Windows/macOS/Linux (:mod:`remote.host.desktop`).
+* ``android`` – an ADB-connected Android device (:mod:`remote.host.android`).
+* ``virtual`` – a drawn demo desktop, used headless or for demos.
+"""
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import time
 from typing import Protocol
 
 from remote.host.virtual_desktop import VirtualDesktop
+
+logger = logging.getLogger("remotedesk.host.capture")
+
+BACKENDS = ("auto", "desktop", "android", "virtual")
 
 
 class FrameSource(Protocol):
@@ -47,100 +60,59 @@ class VirtualSource:
         return "virtual"
 
 
-class MssSource:
-    def __init__(self) -> None:
-        import mss  # type: ignore
-        from PIL import Image
-        import io
+def open_frame_source(
+    prefer_virtual: bool = False,
+    *,
+    backend: str = "auto",
+    adb_serial: str | None = None,
+    max_width: int = 1280,
+) -> FrameSource:
+    """Create a frame source for the requested backend.
 
-        self._mss = mss.mss()
-        self._Image = Image
-        self._io = io
-        mon = self._mss.monitors[1] if len(self._mss.monitors) > 1 else self._mss.monitors[0]
-        self.width = int(mon["width"])
-        self.height = int(mon["height"])
-        self._monitor = mon
-        self._controller = None
-        self._keyboard = None
-        try:
-            from pynput.mouse import Controller as MouseCtl
-            from pynput.keyboard import Controller as KeyCtl
+    ``prefer_virtual`` is kept for backwards compatibility and is equivalent to
+    ``backend="virtual"``.
+    """
+    if prefer_virtual:
+        backend = "virtual"
+    if backend not in BACKENDS:
+        raise ValueError(f"unknown backend {backend!r}; choose from {BACKENDS}")
 
-            self._controller = MouseCtl()
-            self._keyboard = KeyCtl()
-        except Exception:
-            pass
+    if backend == "virtual":
+        return VirtualSource()
 
-    def grab_jpeg(self, quality: int = 70) -> bytes:
-        raw = self._mss.grab(self._monitor)
-        img = self._Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
-        max_w = 1280
-        if img.width > max_w:
-            ratio = max_w / img.width
-            img = img.resize((max_w, int(img.height * ratio)))
-            self.width, self.height = img.size
-        buf = self._io.BytesIO()
-        img.save(buf, format="JPEG", quality=quality, optimize=True)
-        return buf.getvalue()
+    if backend == "android":
+        from remote.host.android import AndroidAdbSource
 
-    def handle_mouse(self, event: str, x: int, y: int, button: str = "left") -> None:
-        if not self._controller:
-            return
-        from pynput.mouse import Button
+        return AndroidAdbSource(serial=adb_serial, max_width=max_width)
 
-        self._controller.position = (int(x), int(y))
-        mapping = {"left": Button.left, "right": Button.right, "middle": Button.middle}
-        btn = mapping.get(button, Button.left)
-        if event == "down":
-            self._controller.press(btn)
-        elif event == "up":
-            self._controller.release(btn)
-        elif event == "scroll":
-            self._controller.scroll(0, 1 if button == "up" else -1)
+    if backend == "desktop":
+        return _open_desktop(max_width) or VirtualSource()
 
-    def handle_key(self, event: str, key: str) -> None:
-        if not self._keyboard:
-            return
-        from pynput.keyboard import Key
-
-        special = {
-            "Enter": Key.enter,
-            "Backspace": Key.backspace,
-            "Tab": Key.tab,
-            "Escape": Key.esc,
-            "ArrowLeft": Key.left,
-            "ArrowRight": Key.right,
-            "ArrowUp": Key.up,
-            "ArrowDown": Key.down,
-            "Shift": Key.shift,
-            "Control": Key.ctrl,
-            "Alt": Key.alt,
-            "Meta": Key.cmd,
-            " ": Key.space,
-        }
-        target = special.get(key, key if len(key) == 1 else None)
-        if target is None:
-            return
-        try:
-            if event == "down":
-                self._keyboard.press(target)
-            else:
-                self._keyboard.release(target)
-        except Exception:
-            pass
-
-    def backend_name(self) -> str:
-        return "mss"
-
-
-def open_frame_source(prefer_virtual: bool = False) -> FrameSource:
-    if not prefer_virtual and has_display():
-        try:
-            return MssSource()
-        except Exception:
-            pass
+    # auto
+    if has_display():
+        source = _open_desktop(max_width)
+        if source is not None:
+            return source
+        logger.info("无法打开真实屏幕，回退到演示桌面")
     return VirtualSource()
+
+
+def _open_desktop(max_width: int) -> "FrameSource | None":
+    from remote.host.desktop import DesktopSource
+
+    try:
+        return DesktopSource(max_width=max_width)
+    except Exception as exc:
+        logger.warning("desktop backend unavailable: %s", exc)
+        return None
 
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+# Backwards-compatible alias for the former class name.
+def MssSource() -> FrameSource:  # noqa: N802 - kept for compatibility
+    from remote.host.desktop import DesktopSource
+
+    return DesktopSource()

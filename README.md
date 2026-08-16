@@ -13,7 +13,42 @@
 - 文件拖拽发送到被控端 `~/RemoteDeskDownloads`
 - 会话内文字消息、延迟 / FPS 显示
 - 无显示器时自动使用可交互的**演示桌面**（可拖窗口、打字、点开始菜单）
+- **跨平台被控端**：Windows / macOS / Linux 真机截屏 + 键鼠注入，Android 经 ADB 桥远程控制
 - 有显示器时尝试真实截屏，并用 pynput 注入输入
+
+## 跨平台被控端（backend）
+
+被控端通过 `--backend` 选择画面/输入来源：
+
+| backend | 平台 | 画面 | 输入 |
+| --- | --- | --- | --- |
+| `auto`（默认） | 全部 | 有显示器→desktop，否则→virtual | 同左 |
+| `desktop` | Windows / macOS / Linux | `mss` 截屏 | `pynput` 键鼠 |
+| `android` | 任意电脑 + 安卓设备 | `adb screencap` | `adb input`（点按/滑动/文本/按键） |
+| `virtual` | 全部 | 内置演示桌面 | 内置演示桌面 |
+
+### macOS
+
+`desktop` 后端在 macOS 上用 `mss` + `pynput`，已处理 Retina 物理/逻辑像素换算和多显示器偏移。首次运行需授权：
+
+> 系统设置 → 隐私与安全性 → **屏幕录制** 和 **辅助功能**，勾选运行本程序的终端/应用，然后重启被控端。
+
+```bash
+pip install -e ".[host]"
+python -m remote host --server ws://<服务器>/ws --backend desktop
+```
+
+### Android（ADB 桥）
+
+在一台电脑上运行被控端，用 USB 或 `adb connect` 接入安卓设备，即可把**该安卓设备**变成被控端。需要先装好 [platform-tools(adb)](https://developer.android.com/tools/releases/platform-tools) 并在手机上开启「USB 调试」。
+
+```bash
+adb devices                        # 确认设备已授权
+python -m remote host --server ws://<服务器>/ws --backend android
+# 多台设备时用 --adb-serial <序列号> 指定
+```
+
+> 说明：这是**贴合现有 Python 架构、可落地可测试**的方案，把安卓设备作为被控端。若需要「手机上装 App 即可被控」的**原生 Android 应用**（MediaProjection + 无障碍注入 + 原生 WebRTC），那是另一套更大的工程，不在本仓库范围内。
 
 ## 架构
 
@@ -64,7 +99,9 @@ python -m remote host --server ws://服务器IP:8080/ws
 | 命令 | 作用 |
 | --- | --- |
 | `python -m remote server` | 信令 + 网页 UI |
-| `python -m remote host` | 被控端，打印识别码/密码 |
+| `python -m remote host` | 被控端，打印识别码/密码（backend=auto） |
+| `python -m remote host --backend desktop` | 强制真机截屏（Win/macOS/Linux） |
+| `python -m remote host --backend android` | 经 ADB 控制安卓设备 |
 | `python -m remote host --virtual` | 强制使用演示桌面 |
 | `python -m remote demo` | 本地同时拉起信令和演示主机 |
 
