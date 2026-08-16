@@ -230,6 +230,8 @@ function onSessionMessage(data) {
     state.screenW = msg.width;
     state.screenH = msg.height;
     $("stat-size").textContent = `${msg.width}×${msg.height}`;
+  } else if (msg.type === "ping") {
+    sendSession({ type: "pong", t: msg.t }); // reply so the host can measure its RTT
   } else if (msg.type === "pong") {
     $("stat-rtt").textContent = `${Date.now() - Number(msg.t || state.lastPing)} ms`;
   } else if (msg.type === "chat") {

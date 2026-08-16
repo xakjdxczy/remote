@@ -96,25 +96,34 @@ class VirtualDesktop:
         self.render_image().save(buf, format="JPEG", quality=quality, optimize=True)
         return buf.getvalue()
 
-    def render_image(self) -> "Image.Image":
+    def _ensure_background(self) -> "Image.Image":
+        """Build the static wallpaper (gradient + desktop icons) once and cache it.
+
+        The gradient is the expensive part; caching it makes 30fps rendering cheap.
+        """
+        cached = getattr(self, "_bg", None)
+        if cached is not None and cached.size == (self.width, self.height):
+            return cached
         img = Image.new("RGB", (self.width, self.height), (18, 36, 68))
         draw = ImageDraw.Draw(img)
         font = ImageFont.load_default()
-
-        # Wallpaper gradient
         for y in range(self.height - TASKBAR_H):
             t = y / max(1, self.height - TASKBAR_H)
             r = int(18 + (46 - 18) * t)
             g = int(48 + (110 - 48) * t)
             b = int(92 + (168 - 92) * t)
             draw.line([(0, y), (self.width, y)], fill=(r, g, b))
-
-        # Desktop icons
-        icons = [("本机", 48, 40), ("文档", 48, 140), ("网络", 48, 240)]
-        for label, ix, iy in icons:
-            draw.rounded_rectangle((ix, iy, ix + 56, iy + 56), 8, fill=(255, 255, 255, ))
+        for label, ix, iy in [("本机", 48, 40), ("文档", 48, 140), ("网络", 48, 240)]:
+            draw.rounded_rectangle((ix, iy, ix + 56, iy + 56), 8, fill=(255, 255, 255))
             draw.rectangle((ix + 10, iy + 14, ix + 46, iy + 46), fill=(47, 128, 237))
             draw.text((ix + 8, iy + 62), label, fill=(240, 246, 255), font=font)
+        self._bg = img
+        return img
+
+    def render_image(self) -> "Image.Image":
+        img = self._ensure_background().copy()
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.load_default()
 
         for win in self.windows:
             self._draw_window(draw, win, font, focused=win is self.focused)
