@@ -92,7 +92,7 @@ class HostAgent:
     def __init__(
         self,
         server: str,
-        fps: int = 12,
+        fps: int = 30,
         quality: int = 70,
         prefer_virtual: bool = False,
         backend: str = "auto",
@@ -116,6 +116,7 @@ class HostAgent:
         self._send_lock = asyncio.Lock()
         self._peer: HostPeer | None = None
         self._traffic_total = load_traffic_total()
+        self._rtt: int | None = None
 
     async def run_forever(self) -> None:
         while not self._stop.is_set():
@@ -200,6 +201,9 @@ class HostAgent:
             if not peer or not peer.pc:
                 last_bytes = 0
                 continue
+            # measure our own latency: ping the viewer over the data channel
+            if peer.is_open:
+                peer.send(encode_json({"type": "ping", "t": now_ms()}))
             try:
                 report = await peer.pc.getStats()
             except Exception:
@@ -215,8 +219,9 @@ class HostAgent:
                 self._traffic_total += delta
                 save_traffic_total(self._traffic_total)
                 speed = delta / dt if dt > 0 else 0
+                rtt = f"{self._rtt} ms" if self._rtt is not None else "-- ms"
                 print(
-                    f"  [流量] 上行 {_fmt_speed(speed)} · 本次 {_fmt_bytes(total)} · 历史 {_fmt_bytes(self._traffic_total)}",
+                    f"  [流量] 上行 {_fmt_speed(speed)} · 本次 {_fmt_bytes(total)} · 历史 {_fmt_bytes(self._traffic_total)} · 延迟 {rtt}",
                     flush=True,
                 )
             last_bytes = total
@@ -306,6 +311,10 @@ class HostAgent:
         elif kind == "ping":
             if self._peer:
                 self._peer.send(encode_json({"type": "pong", "t": msg.get("t")}))
+        elif kind == "pong":
+            t = msg.get("t")
+            if isinstance(t, (int, float)):
+                self._rtt = max(0, now_ms() - int(t))
 
     def _on_binary(self, data: bytes) -> None:
         try:
@@ -327,7 +336,7 @@ class HostAgent:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RemoteDesk host agent")
     parser.add_argument("--server", default=os.environ.get("REMOTEDESK_SERVER", "ws://127.0.0.1:8080/ws"))
-    parser.add_argument("--fps", type=int, default=12)
+    parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--quality", type=int, default=70)
     parser.add_argument(
         "--backend",

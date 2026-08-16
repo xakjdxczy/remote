@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p_host = sub.add_parser("host", help="run the controlled-side agent")
     p_host.add_argument("--server", default=os.environ.get("REMOTEDESK_SERVER", "ws://127.0.0.1:8080/ws"))
-    p_host.add_argument("--fps", type=int, default=12)
+    p_host.add_argument("--fps", type=int, default=30)
     p_host.add_argument("--quality", type=int, default=70)
     p_host.add_argument(
         "--backend",
@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> None:
     p_demo = sub.add_parser("demo", help="start signaling + a local demo host together")
     p_demo.add_argument("--host", default="0.0.0.0")
     p_demo.add_argument("--port", type=int, default=8080)
-    p_demo.add_argument("--fps", type=int, default=10)
+    p_demo.add_argument("--fps", type=int, default=30)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
