@@ -23,7 +23,14 @@ def main(argv: list[str] | None = None) -> None:
     p_host.add_argument("--server", default=os.environ.get("REMOTEDESK_SERVER", "ws://127.0.0.1:8080/ws"))
     p_host.add_argument("--fps", type=int, default=12)
     p_host.add_argument("--quality", type=int, default=70)
-    p_host.add_argument("--virtual", action="store_true")
+    p_host.add_argument(
+        "--backend",
+        choices=["auto", "desktop", "android", "virtual"],
+        default="auto",
+        help="controlled-side backend (auto picks desktop when a display exists)",
+    )
+    p_host.add_argument("--adb-serial", default=None, help="target Android device serial for --backend android")
+    p_host.add_argument("--virtual", action="store_true", help="alias for --backend virtual")
 
     p_demo = sub.add_parser("demo", help="start signaling + a local demo host together")
     p_demo.add_argument("--host", default="0.0.0.0")
@@ -38,7 +45,17 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "host":
         from remote.host.agent import main as host_main
 
-        host_main(["--server", args.server, "--fps", str(args.fps), "--quality", str(args.quality)] + (["--virtual"] if args.virtual else []))
+        host_argv = [
+            "--server", args.server,
+            "--fps", str(args.fps),
+            "--quality", str(args.quality),
+            "--backend", args.backend,
+        ]
+        if args.adb_serial:
+            host_argv += ["--adb-serial", args.adb_serial]
+        if args.virtual:
+            host_argv.append("--virtual")
+        host_main(host_argv)
     elif args.cmd == "demo":
         _run_demo(args.host, args.port, args.fps)
 

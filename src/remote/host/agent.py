@@ -64,6 +64,8 @@ class HostAgent:
         fps: int = 12,
         quality: int = 70,
         prefer_virtual: bool = False,
+        backend: str = "auto",
+        adb_serial: str | None = None,
         on_registered=None,
     ) -> None:
         self.server = server
@@ -71,7 +73,9 @@ class HostAgent:
         self.quality = quality
         self.prefer_virtual = prefer_virtual
         self.on_registered = on_registered
-        self.source = open_frame_source(prefer_virtual=prefer_virtual)
+        self.source = open_frame_source(
+            prefer_virtual=prefer_virtual, backend=backend, adb_serial=adb_serial
+        )
         self.inbox = FileInbox()
         self.device_id: str | None = None
         self.password: str | None = None
@@ -260,14 +264,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--server", default=os.environ.get("REMOTEDESK_SERVER", "ws://127.0.0.1:8080/ws"))
     parser.add_argument("--fps", type=int, default=12)
     parser.add_argument("--quality", type=int, default=70)
-    parser.add_argument("--virtual", action="store_true", help="force the demo virtual desktop")
+    parser.add_argument(
+        "--backend",
+        choices=["auto", "desktop", "android", "virtual"],
+        default="auto",
+        help="controlled-side backend (auto picks desktop when a display exists)",
+    )
+    parser.add_argument("--adb-serial", default=None, help="target Android device serial for --backend android")
+    parser.add_argument("--virtual", action="store_true", help="alias for --backend virtual")
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    agent = HostAgent(server=args.server, fps=args.fps, quality=args.quality, prefer_virtual=args.virtual)
+    backend = "virtual" if args.virtual else args.backend
+    agent = HostAgent(
+        server=args.server,
+        fps=args.fps,
+        quality=args.quality,
+        prefer_virtual=args.virtual,
+        backend=backend,
+        adb_serial=args.adb_serial,
+    )
     try:
         asyncio.run(agent.run_forever())
     except KeyboardInterrupt:

@@ -6,7 +6,15 @@ import asyncio
 from typing import Any
 
 # STUN only helps discover addresses. There is no TURN / media relay.
-STUN_URLS = ["stun:stun.l.google.com:19302"]
+# Several public STUN servers are listed so hosts behind NAT (including in
+# regions where Google's STUN is unreachable) can still discover their public
+# server-reflexive candidate. ICE tries them all; order is not significant.
+STUN_URLS = [
+    "stun:stun.l.google.com:19302",
+    "stun:stun.qq.com:3478",
+    "stun:stun.miwifi.com:3478",
+    "stun:stun.cloudflare.com:3478",
+]
 SIGNAL_KINDS = frozenset({"offer", "answer", "ice", "failed"})
 
 
