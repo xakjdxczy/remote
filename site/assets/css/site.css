@@ -126,7 +126,10 @@ main, .nav, .footer { position: relative; z-index: 1; }
 .card-tag { display: inline-block; font-size: 12px; color: var(--accent3); letter-spacing: 1px; margin-bottom: 10px; }
 .card h3 { margin: 0 0 10px; font-size: 20px; }
 .card p { margin: 0 0 18px; color: var(--muted); font-size: 14.5px; line-height: 1.7; }
-.card-link { color: var(--accent); font-weight: 700; font-size: 14px; }
+.card-link { color: var(--accent); font-weight: 700; font-size: 14px; text-decoration: none; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.card-link.dl { color: var(--accent3); }
+.card-link:hover { text-decoration: underline; }
 .card-soon { opacity: 0.7; cursor: default; }
 .card-soon:hover { transform: none; box-shadow: none; border-color: var(--border); }
 .card-soon .card-link { color: var(--muted); }
