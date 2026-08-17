@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
 import okhttp3.OkHttpClient
@@ -44,6 +45,9 @@ class ScreenCaptureService : Service() {
 
     private var statsThread: HandlerThread? = null
     private var statsHandler: Handler? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var sceneWatch: SceneWatchdog? = null
+    private var bursting = false
 
     private var deviceW = 0
     private var deviceH = 0
@@ -131,11 +135,7 @@ class ScreenCaptureService : Service() {
             applicationContext, HostState.signaling ?: return,
             if (HostState.iceServers.isNotEmpty()) HostState.iceServers else iceServers,
             track, capW, capH, deviceW, deviceH,
-            onNeedKeyframe = {
-                try { capturer?.changeCaptureFormat(capW, capH, fps) } catch (e: Exception) {
-                    Log.w(TAG, "keyframe recapture: ${e.message}")
-                }
-            },
+            onNeedKeyframe = { burstThenRestore() },
         )
         host = h
         HostState.hostPeer = h
@@ -174,6 +174,37 @@ class ScreenCaptureService : Service() {
         cap.startCapture(capW, capH, fps)
         videoTrack = factory.createVideoTrack("screen", src)
         screenTrack = videoTrack
+        val watch = SceneWatchdog { mainHandler.post { burstThenRestore() } }
+        sceneWatch = watch
+        videoTrack?.addSink(watch)
+    }
+
+    /** Drop to a budget-sized I-frame, then step sharpness back. */
+    fun burstThenRestore() {
+        if (bursting) return
+        bursting = true
+        val bps = host?.currentBitrateBps ?: WebRtcHost.TURN_MAX_BPS
+        val (bw, bh, scale) = Latency.sceneScaleSize(capW, capH, Latency.keyframeBudgetBytes(bps))
+        val useW = if (scale < 0.98f) bw else maxOf(160, capW / 2).let { it - it % 2 }
+        val useH = if (scale < 0.98f) bh else maxOf(90, capH / 2).let { it - it % 2 }
+        applyCaptureSize(useW, useH)
+        host?.notifySceneChange()
+        val midW = Latency.evenDim((useW + capW) / 2)
+        val midH = Latency.evenDim((useH + capH) / 2)
+        mainHandler.postDelayed({ applyCaptureSize(midW, midH) }, Latency.SCENE_STEP_MS)
+        mainHandler.postDelayed({
+            applyCaptureSize(capW, capH)
+            bursting = false
+        }, Latency.SCENE_RESTORE_MS)
+    }
+
+    private fun applyCaptureSize(w: Int, h: Int) {
+        try { videoSource?.adaptOutputFormat(w, h, fps) } catch (e: Exception) {
+            Log.w(TAG, "adapt $w x $h: ${e.message}")
+        }
+        try { capturer?.changeCaptureFormat(w, h, fps) } catch (e: Exception) {
+            Log.w(TAG, "recapture $w x $h: ${e.message}")
+        }
     }
 
     private fun startStatsLoop() {
@@ -266,6 +297,10 @@ class ScreenCaptureService : Service() {
 
     override fun onDestroy() {
         try { statsThread?.quitSafely() } catch (_: Exception) {}
+        sceneWatch?.let { try { videoTrack?.removeSink(it) } catch (_: Exception) {} }
+        sceneWatch = null
+        mainHandler.removeCallbacksAndMessages(null)
+        bursting = false
         try { host?.close() } catch (_: Exception) {}
         try { capturer?.stopCapture() } catch (_: Exception) {}
         try { capturer?.dispose() } catch (_: Exception) {}

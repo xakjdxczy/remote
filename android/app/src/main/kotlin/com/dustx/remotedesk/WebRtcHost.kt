@@ -40,6 +40,7 @@ class WebRtcHost(
     private val deviceH: Int,
     private val onNeedKeyframe: (() -> Unit)? = null,
 ) {
+    val currentBitrateBps: Int get() = currentMaxBps
     private var pc: PeerConnection? = null
     private var dc: DataChannel? = null
     private var answerSent = false
@@ -124,6 +125,10 @@ class WebRtcHost(
         val channel = dc ?: return
         val data = obj.toString().toByteArray(Charsets.UTF_8)
         channel.send(DataChannel.Buffer(ByteBuffer.wrap(data), false))
+    }
+
+    fun notifySceneChange() {
+        sendJson(JSONObject().put("type", "scene_change"))
     }
 
     fun close() {
@@ -218,6 +223,7 @@ class WebRtcHost(
                     main.post {
                         if (action == "keyframe" || buf >= 180) {
                             applySenderParams(if (relayPath) TURN_STRESS_BPS else P2P_STRESS_BPS)
+                            notifySceneChange()
                             try { onNeedKeyframe?.invoke() } catch (e: Exception) {
                                 Log.w(TAG, "keyframe: ${e.message}")
                             }

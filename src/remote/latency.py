@@ -21,6 +21,20 @@ BUFFER_CATCHUP_SOFT_MS = 70
 BUFFER_CATCHUP_HARD_MS = 120
 BUFFER_KEYFRAME_MS = 180
 
+# Scene-change I-frames are far larger than the average bitrate. Size the
+# first intra so it can leave the sender in 80–120ms at the current cap,
+# then step resolution back up. 0.75 bpp matches a typical VP8/H.264
+# scene-change intra (average inter frames are much cheaper).
+KEYFRAME_BUDGET_MS = 100
+KEYFRAME_BUDGET_MIN_MS = 80
+KEYFRAME_BUDGET_MAX_MS = 120
+KEYFRAME_BITS_PER_PIXEL = 0.75
+SCENE_DIFF_THRESHOLD = 0.16
+SCENE_STEP_MS = 200
+SCENE_RESTORE_MS = 350
+LUMA_SAMPLE_W = 32
+LUMA_SAMPLE_H = 18
+
 
 def playback_rate_for_buffer_ms(jb_ms: float) -> float:
     """Return a playbackRate that drains `jb_ms` of jitter-buffer delay."""
@@ -36,6 +50,93 @@ def playback_rate_for_buffer_ms(jb_ms: float) -> float:
 def should_request_keyframe(jb_ms: float) -> bool:
     """True when the receiver should ask the sender for a fresh keyframe."""
     return jb_ms >= BUFFER_KEYFRAME_MS
+
+
+def should_drop_until_keyframe(*, jb_ms: float | None = None, scene_change: bool = False) -> bool:
+    """True when the viewer should discard delta frames and wait for the next intra."""
+    if scene_change:
+        return True
+    return jb_ms is not None and jb_ms >= BUFFER_CATCHUP_HARD_MS
+
+
+def even_dim(n: int, minimum: int = 2) -> int:
+    """Even positive dimension (encoders reject odd YUV sizes)."""
+    value = max(int(minimum), int(n))
+    if value % 2:
+        value -= 1
+    return max(int(minimum) + int(minimum) % 2, value)
+
+
+def keyframe_budget_bytes(bitrate_bps: int, budget_ms: float = KEYFRAME_BUDGET_MS) -> int:
+    """Bytes an I-frame may occupy to finish sending in ``budget_ms``."""
+    bps = max(1, int(bitrate_bps))
+    ms = min(KEYFRAME_BUDGET_MAX_MS, max(KEYFRAME_BUDGET_MIN_MS, float(budget_ms)))
+    return max(1024, int(bps * (ms / 1000.0) / 8.0))
+
+
+def scene_scale_size(
+    width: int,
+    height: int,
+    budget_bytes: int,
+    *,
+    bits_per_pixel: float = KEYFRAME_BITS_PER_PIXEL,
+) -> tuple[int, int, float]:
+    """Return ``(w, h, scale)`` so a scene-change I-frame fits ``budget_bytes``."""
+    w = max(2, int(width))
+    h = max(2, int(height))
+    budget = max(1, int(budget_bytes))
+    raw = (w * h * float(bits_per_pixel)) / 8.0
+    if raw <= budget:
+        return even_dim(w), even_dim(h), 1.0
+    scale = (budget / raw) ** 0.5
+    scale = max(0.35, min(1.0, scale))
+    sw = min(even_dim(w), even_dim(round(w * scale)))
+    sh = min(even_dim(h), even_dim(round(h * scale)))
+    actual = (sw / w) if w else 1.0
+    return sw, sh, actual
+
+
+def scene_burst_ladder(
+    width: int,
+    height: int,
+    budget_bytes: int,
+) -> list[tuple[int, int, int]]:
+    """Resolution steps after a switch: ``(w, h, hold_ms)``, last is full quality."""
+    fw, fh = even_dim(width), even_dim(height)
+    sw, sh, scale = scene_scale_size(fw, fh, budget_bytes)
+    if scale >= 0.98:
+        return [(fw, fh, 0)]
+    mw = even_dim(round((sw + fw) / 2))
+    mh = even_dim(round((sh + fh) / 2))
+    steps: list[tuple[int, int, int]] = [(sw, sh, SCENE_STEP_MS)]
+    if (mw, mh) not in {(sw, sh), (fw, fh)}:
+        steps.append((mw, mh, max(0, SCENE_RESTORE_MS - SCENE_STEP_MS)))
+    steps.append((fw, fh, 0))
+    return steps
+
+
+def scene_luma_diff(prev: list[int], curr: list[int]) -> float:
+    """Mean absolute difference of 8-bit luma samples, in ``[0, 1]``."""
+    if not prev or not curr or len(prev) != len(curr):
+        return 1.0
+    acc = 0
+    for a, b in zip(prev, curr):
+        acc += abs(int(a) - int(b))
+    return acc / (len(prev) * 255.0)
+
+
+def is_scene_change(diff: float, threshold: float = SCENE_DIFF_THRESHOLD) -> bool:
+    return float(diff) >= float(threshold)
+
+
+def catchup_stale_count(now: float, start: float, count: int, interval: float) -> int:
+    """If the producer is more than one frame behind, jump to the latest tick."""
+    if interval <= 0:
+        return count
+    target = start + count * interval
+    if now - target <= interval:
+        return count
+    return max(count, int((now - start) / interval))
 
 
 def video_bitrate_kbps(*, relay: bool, stressed: bool = False) -> tuple[int, int, int]:

@@ -376,6 +376,8 @@ class HostAgent:
             print(f"  [QoS] 缓冲 {buf} ms · {action}", flush=True)
             logger.info("qos buffer=%s action=%s", buf, action)
             if self._peer:
+                if action == "keyframe":
+                    self._peer.force_scene_burst()
                 asyncio.create_task(self._peer.apply_bitrate(relay=self._relay_path, stressed=True))
         elif kind == "chat":
             print(f"  [聊天] {msg.get('from', 'viewer')}: {msg.get('text')}", flush=True)

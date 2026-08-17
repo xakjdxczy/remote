@@ -25,6 +25,8 @@ const state = {
   lastDecFrames: 0,
   videoReceiver: null,
   lastQosAt: 0,
+  dropUntilKey: false,
+  keyChaseAttached: false,
   deviceId: "",
   password: "",
   role: null,
@@ -39,6 +41,9 @@ const state = {
 // keeps ~100ms. 16ms is a real low-latency target (half a 30fps frame).
 const JB_TARGET_MS = 16;
 const QOS_THROTTLE_MS = 1500;
+const KEYFRAME_BUDGET_MS = 100;
+const KEYFRAME_BPP = 0.75;
+const SCENE_RESTORE_MS = 350;
 
 function playbackRateForBuffer(jbMs) {
   if (jbMs >= 200) return 1.35;
@@ -79,6 +84,72 @@ async function preferH264(pc) {
   }
 }
 
+function keyframeBudgetBytes(bitrateBps, budgetMs = KEYFRAME_BUDGET_MS) {
+  return Math.max(1024, Math.floor(bitrateBps * (budgetMs / 1000) / 8));
+}
+
+function evenDim(n) {
+  const v = Math.max(2, Math.round(n));
+  return v - (v % 2);
+}
+
+function sceneScaleSize(width, height, budgetBytes) {
+  const raw = (width * height * KEYFRAME_BPP) / 8;
+  if (raw <= budgetBytes) return { w: evenDim(width), h: evenDim(height), scale: 1 };
+  const scale = Math.max(0.35, Math.min(1, Math.sqrt(budgetBytes / raw)));
+  return { w: evenDim(width * scale), h: evenDim(height * scale), scale };
+}
+
+function currentCapBps() {
+  return state.connMethod === "relay" ? 1_000_000 : 2_000_000;
+}
+
+function chaseLatestKeyframe() {
+  state.dropUntilKey = true;
+  const v = $("screen");
+  if (v && Math.abs((v.playbackRate || 1) - 1.35) > 0.01) v.playbackRate = 1.35;
+  applyLowLatencyReceiver(state.videoReceiver);
+}
+
+function attachKeyChase(receiver) {
+  if (!receiver || state.keyChaseAttached || typeof receiver.createEncodedStreams !== "function") return;
+  try {
+    const { readable, writable } = receiver.createEncodedStreams();
+    const xf = new TransformStream({
+      transform(chunk, controller) {
+        if (state.dropUntilKey) {
+          if (chunk.type === "key") {
+            state.dropUntilKey = false;
+            controller.enqueue(chunk);
+          }
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    });
+    readable.pipeThrough(xf).pipeTo(writable);
+    state.keyChaseAttached = true;
+  } catch {
+    /* insertable streams not available */
+  }
+}
+
+async function burstHostResolution() {
+  const track = state.displayStream?.getVideoTracks?.()[0];
+  if (!track) return;
+  const settings = track.getSettings?.() || {};
+  const fw = settings.width || 1280;
+  const fh = settings.height || 720;
+  const { w, h, scale } = sceneScaleSize(fw, fh, keyframeBudgetBytes(currentCapBps()));
+  if (scale >= 0.98) return;
+  try {
+    await track.applyConstraints({ width: { ideal: w }, height: { ideal: h } });
+  } catch { /* ignore */ }
+  setTimeout(() => {
+    track.applyConstraints({ width: { ideal: fw }, height: { ideal: fh } }).catch(() => {});
+  }, SCENE_RESTORE_MS);
+}
+
 function applyCatchup(jbMs) {
   const v = $("screen");
   if (v) {
@@ -87,6 +158,7 @@ function applyCatchup(jbMs) {
   }
   applyLowLatencyReceiver(state.videoReceiver);
   const now = Date.now();
+  if (jbMs >= 120) chaseLatestKeyframe();
   if (jbMs >= 180 && now - state.lastQosAt >= QOS_THROTTLE_MS) {
     state.lastQosAt = now;
     sendSession({ type: "qos", buffer_ms: Math.round(jbMs), action: "keyframe" });
@@ -397,6 +469,10 @@ function onSessionMessage(data) {
     // the host can measure its own latency.
   } else if (msg.type === "chat") {
     addChat(msg.from || "对方", msg.text || "");
+  } else if (msg.type === "scene_change") {
+    chaseLatestKeyframe();
+  } else if (msg.type === "qos" && state.role === "host") {
+    if (msg.action === "keyframe" || (msg.buffer_ms || 0) >= 180) burstHostResolution();
   }
 }
 
@@ -420,7 +496,7 @@ async function startHostP2P(session) {
     endSession("已停止共享屏幕");
   });
   const iceServers = session.ice_servers || state.iceServers || [];
-  const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: "all", bundlePolicy: "max-bundle" });
+  const pc = new RTCPeerConnection(rtcPeerConfig(iceServers));
   state.pc = pc;
   stream.getTracks().forEach((t) => pc.addTrack(t, stream));
   await preferH264(pc);
@@ -472,7 +548,7 @@ async function startP2P(session) {
   closeP2P();
   state.role = "viewer";
   const iceServers = session.ice_servers || state.iceServers || [];
-  const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: "all", bundlePolicy: "max-bundle" });
+  const pc = new RTCPeerConnection(rtcPeerConfig(iceServers));
   state.pc = pc;
   const dc = pc.createDataChannel("session", { ordered: true });
   dc.binaryType = "arraybuffer";
@@ -483,6 +559,7 @@ async function startP2P(session) {
   pc.addEventListener("track", (ev) => {
     state.videoReceiver = ev.receiver;
     applyLowLatencyReceiver(ev.receiver);
+    attachKeyChase(ev.receiver);
     const v = $("screen");
     if (v && ev.streams && ev.streams[0]) {
       v.srcObject = ev.streams[0];
@@ -543,10 +620,22 @@ async function handleSignal(msg) {
   await state.pc.setRemoteDescription(msg.sdp);
 }
 
+function rtcPeerConfig(iceServers) {
+  const cfg = { iceServers, iceTransportPolicy: "all", bundlePolicy: "max-bundle" };
+  try {
+    const probe = new RTCPeerConnection({ encodedInsertableStreams: true });
+    probe.close();
+    cfg.encodedInsertableStreams = true;
+  } catch { /* older browsers */ }
+  return cfg;
+}
+
 function closeP2P() {
   state.p2pReady = false;
   state.videoReceiver = null;
   state.lastQosAt = 0;
+  state.dropUntilKey = false;
+  state.keyChaseAttached = false;
   state.pendingOffer = null;
   if (state.displayStream) {
     try { state.displayStream.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
