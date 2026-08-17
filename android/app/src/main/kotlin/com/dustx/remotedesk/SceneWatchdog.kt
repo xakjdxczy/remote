@@ -16,7 +16,7 @@ class SceneWatchdog(private val onSceneChange: () -> Unit) : VideoSink {
         val now = System.currentTimeMillis()
         if (now < coolUntil || now - lastCheck < 90) return
         lastCheck = now
-        val i420 = try { frame.buffer.toI420() } catch (_: Exception) { return }
+        val i420 = try { frame.buffer.toI420() } catch (_: Exception) { null } ?: return
         try {
             val sample = sampleY(i420, Latency.LUMA_W, Latency.LUMA_H)
             val last = prev
