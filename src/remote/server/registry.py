@@ -32,6 +32,7 @@ class Session:
     viewer_ws: Any
     host_ws: Any
     viewer_name: str
+    viewer_id: str | None = None
     created_at: float = field(default_factory=time.time)
     accepted: bool = False
 
@@ -52,8 +53,12 @@ class Registry:
         temp_password: str | None = None,
     ) -> Device:
         device_id = normalize_device_id(preferred_id or "")
-        if device_id and len(device_id) == 9 and device_id not in self.devices:
-            pass
+        if device_id and len(device_id) == 9:
+            # ToDesk-style: the remote code is stable. A reconnect with the
+            # same ID evicts the previous socket instead of minting a new code.
+            existing = self.devices.get(device_id)
+            if existing and existing.ws is not ws:
+                self.unregister(existing.ws)
         else:
             device_id = generate_device_id(set(self.devices))
         password = temp_password or generate_temp_password()
@@ -111,8 +116,16 @@ class Registry:
                 dropped.append(ended)
         return dropped
 
-    def create_session(self, host: Device, viewer_ws: Any, viewer_name: str) -> Session:
+    def create_session(
+        self,
+        host: Device,
+        viewer_ws: Any,
+        viewer_name: str,
+        viewer_id: str | None = None,
+    ) -> Session:
         if host.session_id and host.session_id in self.sessions:
+            raise RuntimeError("busy")
+        if self.session_for_ws(viewer_ws):
             raise RuntimeError("busy")
         session = Session(
             session_id=uuid.uuid4().hex,
@@ -120,6 +133,7 @@ class Registry:
             viewer_ws=viewer_ws,
             host_ws=host.ws,
             viewer_name=viewer_name or "viewer",
+            viewer_id=viewer_id,
         )
         self.sessions[session.session_id] = session
         host.session_id = session.session_id

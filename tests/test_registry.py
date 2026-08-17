@@ -30,6 +30,19 @@ def test_session_busy_and_end():
     assert again.session_id != session.session_id
 
 
+def test_preferred_id_is_reclaimed_not_rotated():
+    registry = Registry()
+    first = DummyWs()
+    host = registry.register_host(first, "pc-a", "Linux", preferred_id="111222333", temp_password="keepme12")
+    assert host.device_id == "111222333"
+    second = DummyWs()
+    again = registry.register_host(second, "pc-a", "Linux", preferred_id="111222333", temp_password="keepme12")
+    assert again.device_id == "111222333"
+    assert registry.lookup_by_ws(first) is None
+    assert registry.lookup_by_ws(second) is again
+    assert again.temp_password == "keepme12"
+
+
 def test_unregister_ends_session():
     registry = Registry()
     host_ws = DummyWs()

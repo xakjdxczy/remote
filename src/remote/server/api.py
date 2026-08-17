@@ -25,6 +25,8 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 registry = Registry()
 demo_host: dict[str, str] | None = None
 SERVER_START = time.time()
+CALL_TIMEOUT_SEC = 45
+_pending_timers: dict[str, asyncio.Task] = {}
 
 
 def _net_bytes() -> int | None:
@@ -197,10 +199,48 @@ async def _on_signal(ws: WebSocket, msg: dict[str, Any], raw: str) -> None:
         await _end_and_notify(session.session_id, "peer_disconnected")
 
 
+def _session_payload(session: Any, host: Any) -> dict[str, Any]:
+    viewer_id = session.viewer_id or ""
+    return {
+        "type": "session_start",
+        "session_id": session.session_id,
+        "host_id": host.device_id,
+        "host_id_display": format_device_id(host.device_id),
+        "hostname": host.hostname,
+        "os": host.os_name,
+        "viewer_id": viewer_id,
+        "viewer_id_display": format_device_id(viewer_id) if viewer_id else "",
+        "viewer_name": session.viewer_name,
+        "transport": "p2p",
+        "ice_servers": ice_servers_payload(),
+    }
+
+
+def _cancel_call_timer(session_id: str) -> None:
+    task = _pending_timers.pop(session_id, None)
+    if task and not task.done():
+        task.cancel()
+
+
 async def _on_register(ws: WebSocket, msg: dict[str, Any]) -> None:
     if registry.lookup_by_ws(ws):
         await ws.send_text(encode_json({"type": "error", "message": "already registered"}))
         return
+    preferred = normalize_device_id(str(msg.get("device_id") or ""))
+    if preferred and len(preferred) == 9:
+        existing = registry.get(preferred)
+        if existing and existing.ws is not ws:
+            try:
+                await existing.ws.send_text(
+                    encode_json({"type": "replaced", "message": "同一识别码已在其他端登录"})
+                )
+            except Exception:
+                pass
+            await _cleanup(existing.ws)
+            try:
+                await existing.ws.close()
+            except Exception:
+                pass
     device = registry.register_host(
         ws=ws,
         hostname=str(msg.get("hostname") or ""),
@@ -252,39 +292,75 @@ async def _on_connect(ws: WebSocket, msg: dict[str, Any]) -> None:
     if not host:
         await ws.send_text(encode_json({"type": "auth_failed", "message": "device offline"}))
         return
-    if host.session_id:
+    caller = registry.lookup_by_ws(ws)
+    if caller and caller.device_id == host.device_id:
+        await ws.send_text(encode_json({"type": "auth_failed", "message": "cannot connect to self"}))
+        return
+    if host.session_id or registry.session_for_ws(ws):
         await ws.send_text(encode_json({"type": "auth_failed", "message": "device busy"}))
         return
     if not password or not constant_time_equals(password, host.temp_password):
         await ws.send_text(encode_json({"type": "auth_failed", "message": "wrong password"}))
         return
     try:
-        session = registry.create_session(host, ws, viewer_name)
+        session = registry.create_session(
+            host, ws, viewer_name, viewer_id=caller.device_id if caller else None
+        )
     except RuntimeError:
         await ws.send_text(encode_json({"type": "auth_failed", "message": "device busy"}))
         return
-    registry.accept(session.session_id)
-    accepted = {
-        "type": "session_start",
+    incoming = {
+        "type": "incoming_call",
         "session_id": session.session_id,
+        "viewer_id": session.viewer_id or "",
+        "viewer_id_display": format_device_id(session.viewer_id) if session.viewer_id else "",
+        "viewer_name": session.viewer_name,
         "host_id": host.device_id,
-        "hostname": host.hostname,
-        "os": host.os_name,
-        "viewer_name": viewer_name,
-        "transport": "p2p",
-        "ice_servers": ice_servers_payload(),
+        "host_id_display": format_device_id(host.device_id),
     }
-    await host.ws.send_text(encode_json(accepted))
-    await ws.send_text(encode_json(accepted))
+    await host.ws.send_text(encode_json(incoming))
+    await ws.send_text(
+        encode_json(
+            {
+                "type": "call_pending",
+                "session_id": session.session_id,
+                "host_id": host.device_id,
+                "host_id_display": format_device_id(host.device_id),
+                "hostname": host.hostname,
+            }
+        )
+    )
+    _pending_timers[session.session_id] = asyncio.create_task(_call_timeout(session.session_id))
+
+
+async def _call_timeout(session_id: str) -> None:
+    try:
+        await asyncio.sleep(CALL_TIMEOUT_SEC)
+    except asyncio.CancelledError:
+        return
+    session = registry.get_session(session_id)
+    if session and not session.accepted:
+        await _end_and_notify(session_id, "timeout")
 
 
 async def _on_auth_result(ws: WebSocket, msg: dict[str, Any]) -> None:
-    # Host-side confirmation is optional; password is already checked.
     session = registry.get_session(str(msg.get("session_id") or ""))
     if not session or session.host_ws is not ws:
         return
+    _cancel_call_timer(session.session_id)
     if msg.get("ok"):
         registry.accept(session.session_id)
+        host = registry.get(session.host_id)
+        if not host:
+            await _end_and_notify(session.session_id, "host_offline")
+            return
+        payload = encode_json(_session_payload(session, host))
+        for peer in (session.host_ws, session.viewer_ws):
+            try:
+                await peer.send_text(payload)
+            except Exception:
+                await _end_and_notify(session.session_id, "peer_disconnected")
+                return
     else:
         await _end_and_notify(session.session_id, "rejected")
 
@@ -296,6 +372,7 @@ async def _on_hangup(ws: WebSocket, msg: dict[str, Any]) -> None:
 
 
 async def _end_and_notify(session_id: str, reason: str) -> None:
+    _cancel_call_timer(session_id)
     session = registry.end_session(session_id)
     if not session:
         return

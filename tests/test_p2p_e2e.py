@@ -33,6 +33,8 @@ async def _viewer_receive_video(server: str, device_id: str, password: str):
             "password": password,
             "name": "e2e",
         }))
+        pending = json.loads(await ws.recv())
+        assert pending["type"] == "call_pending"
         start = json.loads(await ws.recv())
         assert start["type"] == "session_start"
         assert start["transport"] == "p2p"
@@ -101,6 +103,7 @@ def test_p2p_e2e_video_track():
         fps=8,
         prefer_virtual=True,
         on_registered=on_registered,
+        auto_accept=True,
     )
     host_thread = threading.Thread(target=lambda: asyncio.run(agent.run_forever()), daemon=True)
     host_thread.start()
