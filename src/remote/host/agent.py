@@ -302,6 +302,11 @@ class HostAgent:
         elif kind == "file_done":
             path = self.inbox.finish(int(msg["id"]))
             logger.info("file saved: %s", path)
+        elif kind == "nav":
+            # System navigation (back/home/recents/notifications) — applied on
+            # Android hosts via accessibility global actions; desktop just logs it.
+            print(f"  [导航] {msg.get('action')}", flush=True)
+            logger.info("nav action: %s", msg.get("action"))
         elif kind == "conn_info":
             method = "TURN 中继（经服务器转发）" if msg.get("method") == "relay" else "P2P 直连"
             print(f"  [连接方式] {method}", flush=True)

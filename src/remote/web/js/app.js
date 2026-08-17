@@ -230,6 +230,8 @@ function onSessionMessage(data) {
     state.screenW = msg.width;
     state.screenH = msg.height;
     $("stat-size").textContent = `${msg.width}×${msg.height}`;
+    // Android hosts get a system navigation toolbar (back/home/recents/notifications)
+    $("nav-bar")?.classList.toggle("hidden", msg.backend !== "android");
   } else if (msg.type === "ping") {
     sendSession({ type: "pong", t: msg.t }); // reply so the host can measure its RTT
   } else if (msg.type === "pong") {
@@ -250,6 +252,9 @@ async function startP2P(session) {
   // Receive the screen as a WebRTC video track.
   pc.addTransceiver("video", { direction: "recvonly" });
   pc.addEventListener("track", (ev) => {
+    // Minimise the receive jitter buffer for near-real-time remote control.
+    try { ev.receiver.playoutDelayHint = 0; } catch { /* not supported */ }
+    try { ev.receiver.jitterBufferTarget = 0; } catch { /* not supported */ }
     const v = $("screen");
     if (v && ev.streams && ev.streams[0]) {
       v.srcObject = ev.streams[0];
@@ -311,6 +316,7 @@ function closeP2P() {
 function endSession(reason) {
   const wasSession = state.session;
   state.session = false;
+  $("nav-bar")?.classList.add("hidden");
   closeP2P();
   if (wasSession) {
     showView("home");
@@ -534,6 +540,11 @@ function bindUi() {
   $("dropzone").addEventListener("drop", (ev) => {
     ev.preventDefault();
     sendFiles(ev.dataTransfer.files);
+  });
+  document.querySelectorAll("#nav-bar button").forEach((b) => {
+    b.addEventListener("click", () => {
+      if (state.p2pReady) sendSession({ type: "nav", action: b.dataset.nav });
+    });
   });
   bindInput();
   setInterval(() => {
