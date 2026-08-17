@@ -1,9 +1,44 @@
+# Node / web
 node_modules/
 dist/
+build/
 *.tsbuildinfo
 *.log
-.DS_Store
-data/
+coverage/
 .env
 .env.local
-coverage/
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# RemoteDesk
+.remotedesk/
+*.jpeg
+*.jpg
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
