@@ -156,11 +156,11 @@ input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(47,128,23
 .nav-bar.hidden { display: none; }
 .nav-bar button {
   padding: 8px 16px; border-radius: 10px; cursor: pointer;
-  border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06);
-  color: #eaf0ff; font-size: 14px;
+  border: 1px solid #4a5a85; background: #2a3352;
+  color: #ffffff; font-size: 14px; font-weight: 600;
 }
-.nav-bar button:hover { background: rgba(91,140,255,0.25); border-color: #5b8cff; }
-.nav-bar button:active { transform: translateY(1px); }
+.nav-bar button:hover { background: #3f6fe0; border-color: #5b8cff; }
+.nav-bar button:active { transform: translateY(1px); background: #2f56b0; }
 
 .dropzone {
   margin-top: 12px;
