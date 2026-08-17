@@ -19,6 +19,10 @@ const state = {
   lastBytes: 0,
   lastStatsAt: 0,
   sessionBytes: 0,
+  lastJbDelay: 0,
+  lastJbCount: 0,
+  lastDecTime: 0,
+  lastDecFrames: 0,
 };
 
 const TRAFFIC_KEY = "dustx_traffic_total_bytes";
@@ -235,7 +239,8 @@ function onSessionMessage(data) {
   } else if (msg.type === "ping") {
     sendSession({ type: "pong", t: msg.t }); // reply so the host can measure its RTT
   } else if (msg.type === "pong") {
-    $("stat-rtt").textContent = `延迟 ${Date.now() - Number(msg.t || state.lastPing)} ms`;
+    // network RTT is shown from getStats (see pollStats); pong is kept only so
+    // the host can measure its own latency.
   } else if (msg.type === "chat") {
     addChat(msg.from || "对方", msg.text || "");
   }
@@ -343,6 +348,13 @@ async function pollStats() {
     let bytes = 0;
     let fps = null;
     let w = null; let h = null;
+    let jbDelay = null; let jbCount = null;
+    let decTime = null; let decFrames = null;
+    let rttMs = null;
+    let selPairId = null;
+    stats.forEach((r) => {
+      if (r.type === "transport" && r.selectedCandidatePairId) selPairId = r.selectedCandidatePairId;
+    });
     stats.forEach((r) => {
       if ((r.type === "inbound-rtp" && r.kind === "video") || r.type === "data-channel") {
         if (typeof r.bytesReceived === "number") bytes += r.bytesReceived;
@@ -350,8 +362,31 @@ async function pollStats() {
       if (r.type === "inbound-rtp" && r.kind === "video") {
         if (typeof r.framesPerSecond === "number") fps = r.framesPerSecond;
         if (typeof r.frameWidth === "number") { w = r.frameWidth; h = r.frameHeight; }
+        if (typeof r.jitterBufferDelay === "number") jbDelay = r.jitterBufferDelay;
+        if (typeof r.jitterBufferEmittedCount === "number") jbCount = r.jitterBufferEmittedCount;
+        if (typeof r.totalDecodeTime === "number") decTime = r.totalDecodeTime;
+        if (typeof r.framesDecoded === "number") decFrames = r.framesDecoded;
+      }
+      if (r.type === "candidate-pair" && typeof r.currentRoundTripTime === "number") {
+        if ((selPairId && r.id === selPairId) || r.nominated || r.selected) rttMs = r.currentRoundTripTime * 1000;
       }
     });
+    // per-interval jitter-buffer and decode latency (ms)
+    let jbMs = null;
+    if (jbDelay != null && jbCount != null && jbCount > state.lastJbCount) {
+      jbMs = (jbDelay - state.lastJbDelay) / (jbCount - state.lastJbCount) * 1000;
+      state.lastJbDelay = jbDelay; state.lastJbCount = jbCount;
+    }
+    let decMs = null;
+    if (decTime != null && decFrames != null && decFrames > state.lastDecFrames) {
+      decMs = (decTime - state.lastDecTime) / (decFrames - state.lastDecFrames) * 1000;
+      state.lastDecTime = decTime; state.lastDecFrames = decFrames;
+    }
+    const parts = [];
+    if (rttMs != null) parts.push(`网络${Math.round(rttMs)}`);
+    if (jbMs != null) parts.push(`缓冲${Math.round(jbMs)}`);
+    if (decMs != null) parts.push(`解码${Math.round(decMs)}`);
+    if (parts.length && $("stat-rtt")) $("stat-rtt").textContent = parts.join("·") + " ms";
     const now = Date.now();
     if (state.lastBytes && bytes >= state.lastBytes) {
       const dt = (now - state.lastStatsAt) / 1000;
