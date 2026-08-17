@@ -27,17 +27,17 @@ import org.webrtc.VideoTrack
 
 /**
  * Foreground service: captures the screen as a WebRTC video track
- * (ScreenCapturerAndroid + hardware encoder) and runs signaling + the peer.
+ * (ScreenCapturerAndroid + hardware encoder). Signaling stays in KeepAliveService
+ * so going to the background does not drop the remote-code socket.
  * Traffic (speed / session / historical) and latency come from getStats().
  */
-class ScreenCaptureService : Service(), SignalingClient.Callbacks {
+class ScreenCaptureService : Service() {
 
     private var capturer: ScreenCapturerAndroid? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
     private var surfaceHelper: SurfaceTextureHelper? = null
 
-    private var signaling: SignalingClient? = null
     private var host: WebRtcHost? = null
     var screenTrack: org.webrtc.VideoTrack? = null
         private set
@@ -112,8 +112,12 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
             HostState.iceServers = iceServers
         }.start()
         startVideoCapture(data)
-        if (HostState.signaling == null) startSignaling(url)
+        if (HostState.signaling == null) KeepAliveService.start(this, url)
         startStatsLoop()
+        if (HostState.pendingHostAttach) {
+            HostState.pendingHostAttach = false
+            attachHost()
+        }
         HostState.set(status = "录屏已就绪，等待连接")
         return START_STICKY
     }
@@ -124,7 +128,7 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
         val track = videoTrack
         screenTrack = track
         val h = WebRtcHost(
-            applicationContext, HostState.signaling ?: signaling ?: return,
+            applicationContext, HostState.signaling ?: return,
             if (HostState.iceServers.isNotEmpty()) HostState.iceServers else iceServers,
             track, capW, capH, deviceW, deviceH,
             onNeedKeyframe = {
@@ -170,13 +174,6 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
         cap.startCapture(capW, capH, fps)
         videoTrack = factory.createVideoTrack("screen", src)
         screenTrack = videoTrack
-    }
-
-    private fun startSignaling(url: String) {
-        val sig = SignalingClient(applicationContext, url, Build.MODEL ?: "Android", "Android ${Build.VERSION.RELEASE}", this)
-        signaling = sig
-        HostState.signaling = sig
-        sig.connect()
     }
 
     private fun startStatsLoop() {
@@ -249,43 +246,6 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
         return if (bits < 1e6) String.format("%.0f Kbps", bits / 1e3) else String.format("%.2f Mbps", bits / 1e6)
     }
 
-    // ---- SignalingClient.Callbacks --------------------------------------
-    override fun onRegistered(deviceId: String, password: String) {
-        HostState.myDeviceId = deviceId
-        HostState.set(status = "在线，等待连接", deviceId = deviceId, password = password)
-    }
-
-    override fun onIncomingCall(msg: JSONObject) {
-        HostState.incoming = msg
-        HostState.incomingListener?.invoke(msg)
-        HostState.set(status = "来电 ${msg.optString("viewer_id_display")}")
-    }
-    override fun onCallPending(msg: JSONObject) {
-        HostState.set(status = "等待对方同意…")
-    }
-    override fun onPassword(password: String) {
-        HostState.set(password = password)
-    }
-    override fun onSessionStart(msg: JSONObject) {
-        val myId = HostState.myDeviceId
-        if (myId.isNotEmpty() && msg.optString("host_id") != myId) return
-        HostState.setMedia(peerId = msg.optString("viewer_id_display").ifEmpty { msg.optString("viewer_name") })
-        attachHost()
-    }
-
-    override fun onSignal(msg: JSONObject) {
-        host?.onSignal(msg)
-        HostState.viewer?.onSignal(msg)
-    }
-
-    override fun onSessionEnd(reason: String) {
-        host?.close(); host = null
-        HostState.hostPeer = null
-        HostState.set(status = "在线，等待连接")
-    }
-
-    override fun onClosed() { HostState.set(status = "信令断开") }
-
     private fun startForegroundInternal() {
         val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -306,9 +266,6 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
 
     override fun onDestroy() {
         try { statsThread?.quitSafely() } catch (_: Exception) {}
-        if (signaling != null && signaling !== HostState.signaling) {
-            try { signaling?.close() } catch (_: Exception) {}
-        }
         try { host?.close() } catch (_: Exception) {}
         try { capturer?.stopCapture() } catch (_: Exception) {}
         try { capturer?.dispose() } catch (_: Exception) {}

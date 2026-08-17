@@ -28,7 +28,7 @@ class ViewerActivity : AppCompatActivity() {
             runOnUiThread {
                 findViewById<TextView>(R.id.viewer_meta).text =
                     "对方 ${HostState.peerId}  ·  ${HostState.codec}  ·  ${HostState.proto}"
-                if (HostState.status.contains("断开") || HostState.status.contains("在线，等待")) finish()
+                if (HostState.status.startsWith("在线 ·") || HostState.status == "已下线") finish()
             }
         }
     }

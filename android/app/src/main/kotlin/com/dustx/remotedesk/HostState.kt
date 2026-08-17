@@ -25,6 +25,8 @@ object HostState {
     @Volatile var viewer: WebRtcViewer? = null
     @Volatile var iceServers: List<org.webrtc.PeerConnection.IceServer> = emptyList()
     @Volatile var myDeviceId: String = ""
+    @Volatile var uiResumed: Boolean = false
+    @Volatile var pendingHostAttach: Boolean = false
 
     @Volatile var listener: (() -> Unit)? = null
 

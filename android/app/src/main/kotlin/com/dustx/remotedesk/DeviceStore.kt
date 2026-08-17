@@ -25,4 +25,18 @@ object DeviceStore {
     fun setRefreshSec(ctx: Context, sec: Int) {
         prefs(ctx).edit().putInt("refresh_sec", sec).apply()
     }
+
+    fun serverUrl(ctx: Context): String =
+        prefs(ctx).getString("server_url", "")?.ifBlank { null }
+            ?: "wss://117.72.108.246/ws"
+
+    fun setServerUrl(ctx: Context, url: String) {
+        prefs(ctx).edit().putString("server_url", url).apply()
+    }
+
+    fun askedBattery(ctx: Context): Boolean = prefs(ctx).getBoolean("asked_battery", false)
+
+    fun setAskedBattery(ctx: Context) {
+        prefs(ctx).edit().putBoolean("asked_battery", true).apply()
+    }
 }

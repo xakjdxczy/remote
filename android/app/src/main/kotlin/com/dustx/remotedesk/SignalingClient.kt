@@ -30,15 +30,25 @@ class SignalingClient(
     }
 
     private val client = OkHttpClient.Builder()
-        .pingInterval(20, TimeUnit.SECONDS)
+        .pingInterval(15, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
     private var ws: WebSocket? = null
+    @Volatile var connected: Boolean = false
+        private set
+    @Volatile private var closedByUs = false
 
     fun connect() {
+        closedByUs = false
+        try { ws?.cancel() } catch (_: Exception) {}
+        connected = false
         val req = Request.Builder().url(url).build()
         ws = client.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                connected = true
                 val reg = JSONObject()
                     .put("type", "register")
                     .put("role", "host")
@@ -51,13 +61,22 @@ class SignalingClient(
 
             override fun onMessage(webSocket: WebSocket, text: String) = handle(text)
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = cb.onClosed()
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                connected = false
+                if (!closedByUs) cb.onClosed()
+            }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "ws failure: ${t.message}")
-                cb.onClosed()
+                connected = false
+                if (!closedByUs) cb.onClosed()
             }
         })
+    }
+
+    fun ping() {
+        if (!connected) return
+        send(JSONObject().put("type", "ping").put("t", System.currentTimeMillis()))
     }
 
     fun send(obj: JSONObject) {
@@ -106,11 +125,15 @@ class SignalingClient(
             "signal" -> cb.onSignal(msg)
             "session_end" -> cb.onSessionEnd(msg.optString("reason"))
             "auth_failed" -> cb.onSessionEnd(msg.optString("message").ifEmpty { "auth_failed" })
+            "pong" -> { /* keepalive */ }
         }
     }
 
     fun close() {
+        closedByUs = true
+        connected = false
         try { ws?.close(1000, "bye") } catch (_: Exception) {}
+        ws = null
     }
 
     companion object { private const val TAG = "RD.Signal" }

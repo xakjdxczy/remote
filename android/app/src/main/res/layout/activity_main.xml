@@ -22,7 +22,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="让这台安卓设备可被远程协助（画面走 P2P 直连）"
+            android:text="切到后台也会保持在线。请允许忽略电池优化，避免系统杀掉连接。"
             android:textColor="#9AA6C4"
             android:textSize="13sp" />
 
@@ -70,7 +70,25 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:backgroundTint="#2A3352"
-            android:text="停止"
+            android:text="停止共享屏幕"
+            android:textColor="#EAF0FF" />
+
+        <Button
+            android:id="@+id/btn_offline"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="#8B3A4A"
+            android:text="下线（断开信令）"
+            android:textColor="#FFFFFF" />
+
+        <Button
+            android:id="@+id/btn_battery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="#2A3352"
+            android:text="允许后台运行（忽略电池优化）"
             android:textColor="#EAF0FF" />
 
         <Button
