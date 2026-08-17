@@ -25,6 +25,14 @@ const state = {
   lastDecFrames: 0,
   videoReceiver: null,
   lastQosAt: 0,
+  deviceId: "",
+  password: "",
+  role: null,
+  pendingOffer: null,
+  pendingCall: null,
+  displayStream: null,
+  pwTimer: null,
+  registered: false,
 };
 
 // Chrome treats jitterBufferTarget=0 as "unset" on some versions and then
@@ -89,6 +97,9 @@ function applyCatchup(jbMs) {
 }
 
 const TRAFFIC_KEY = "dustx_traffic_total_bytes";
+const ID_KEY = "dustx_device_id";
+const PW_KEY = "dustx_password";
+const PW_REFRESH_KEY = "dustx_pw_refresh_sec";
 function fmtBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -179,19 +190,26 @@ async function detectConnType() {
       let local = null; let remote = null;
       stats.forEach((r) => { if (r.id === sel.localCandidateId) local = r; if (r.id === sel.remoteCandidateId) remote = r; });
       if ((local && local.candidateType === "relay") || (remote && remote.candidateType === "relay")) method = "relay";
+      const proto = (local && (local.relayProtocol || local.protocol)) || (remote && remote.protocol) || "udp";
+      applyConnMethod(method, proto);
+      return;
     }
     applyConnMethod(method);
   } catch { /* ignore */ }
 }
 
-function applyConnMethod(method) {
-  if (state.connMethod === method) return;
-  state.connMethod = method;
+function applyConnMethod(method, proto) {
   const relay = method === "relay";
-  setStatus(relay ? "TURN 中继" : "P2P 直连", "busy");
-  if ($("stat-path")) $("stat-path").textContent = relay ? "TURN 中继" : "P2P 直连";
-  addChat("系统", relay ? "当前走 TURN 中继（经服务器转发）" : "当前 P2P 直连（不经服务器）");
-  sendSession({ type: "conn_info", method });
+  const label = relay ? "TURN 中继" : "P2P 直连";
+  const transport = proto ? String(proto).toUpperCase() : "";
+  if (state.connMethod !== method) {
+    state.connMethod = method;
+    setStatus(label, "busy");
+    addChat("系统", transport ? `${label} · ${transport}` : label);
+    sendSession({ type: "conn_info", method, protocol: transport.toLowerCase() });
+  }
+  if ($("stat-path")) $("stat-path").textContent = label;
+  if ($("stat-proto") && transport) $("stat-proto").textContent = transport;
 }
 
 function waitGathering(pc, ms = 8000) {
@@ -215,13 +233,12 @@ async function loadConfig() {
     (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => String(u).startsWith("turn:") || String(u).startsWith("turns:")),
   );
   if (cfg.demo_host) {
-    $("local-id").textContent = cfg.demo_host.device_id_display;
-    $("local-pass").textContent = cfg.demo_host.password;
     $("remote-id").value = cfg.demo_host.device_id_display;
     $("remote-pass").value = cfg.demo_host.password;
-    $("local-hint").textContent = "演示主机已在线。连接后画面走 P2P 直连，不经过信令服务器。";
-    setStatus("演示主机在线", "online");
+    $("local-hint").textContent = `演示主机 ${cfg.demo_host.device_id_display} 已在线。本机远程码见上方，连接演示主机需对方同意。`;
   }
+  const savedRefresh = localStorage.getItem(PW_REFRESH_KEY);
+  if (savedRefresh && $("pw-refresh")) $("pw-refresh").value = savedRefresh;
 }
 
 function ensureSocket() {
@@ -233,11 +250,57 @@ function ensureSocket() {
   ws.addEventListener("close", () => {
     if (state.session) endSession("信令已断开");
     state.ws = null;
+    state.registered = false;
+    setStatus("信令断开", "offline");
+    setTimeout(() => { goOnline().catch(() => {}); }, 1500);
   });
   return new Promise((resolve, reject) => {
     ws.addEventListener("open", () => resolve(ws), { once: true });
     ws.addEventListener("error", () => reject(new Error("无法连接信令服务器")), { once: true });
   });
+}
+
+async function goOnline() {
+  await ensureSocket();
+  if (state.registered) return;
+  sendSignal({
+    type: "register",
+    hostname: $("viewer-name")?.value || (navigator.platform || "web"),
+    os: navigator.userAgent || "browser",
+    device_id: localStorage.getItem(ID_KEY) || "",
+    temp_password: localStorage.getItem(PW_KEY) || "",
+  });
+}
+
+function applyRegistered(msg) {
+  state.registered = true;
+  state.deviceId = msg.device_id;
+  state.password = msg.temp_password;
+  localStorage.setItem(ID_KEY, msg.device_id);
+  localStorage.setItem(PW_KEY, msg.temp_password);
+  if ($("local-id")) $("local-id").textContent = msg.device_id_display || formatId(msg.device_id);
+  if ($("local-pass")) $("local-pass").textContent = msg.temp_password;
+  if (!state.session) setStatus("在线", "online");
+}
+
+function showIncoming(msg) {
+  state.pendingCall = msg;
+  if ($("incoming-id")) $("incoming-id").textContent = msg.viewer_id_display || formatId(msg.viewer_id) || "未知";
+  if ($("incoming-name")) $("incoming-name").textContent = msg.viewer_name ? `来自 ${msg.viewer_name}` : "有人请求远程控制本机";
+  $("incoming-modal")?.classList.remove("hidden");
+}
+
+function hideIncoming() {
+  $("incoming-modal")?.classList.add("hidden");
+}
+
+function answerCall(ok) {
+  const call = state.pendingCall;
+  hideIncoming();
+  if (!call) return;
+  sendSignal({ type: "auth_result", session_id: call.session_id, ok: !!ok });
+  state.pendingCall = null;
+  if (!ok) addChat("系统", "已拒绝来电");
 }
 
 function sendSignal(obj) {
@@ -257,7 +320,12 @@ function onMessage(ev) {
     return;
   }
   const msg = JSON.parse(ev.data);
-  if (msg.type === "auth_failed") {
+  if (msg.type === "registered") {
+    applyRegistered(msg);
+  } else if (msg.type === "password") {
+    applyRegistered({ device_id: state.deviceId, device_id_display: formatId(state.deviceId), temp_password: msg.temp_password });
+    addChat("系统", "密码已刷新");
+  } else if (msg.type === "auth_failed") {
     $("connect-error").hidden = false;
     $("connect-error").textContent = msg.message === "device offline"
       ? "设备不在线"
@@ -265,22 +333,45 @@ function onMessage(ev) {
         ? "密码错误"
         : msg.message === "device busy"
           ? "设备正忙"
-          : msg.message || "连接失败";
-    setStatus("未连接", "offline");
+          : msg.message === "cannot connect to self"
+            ? "不能连接自己的远程码"
+            : msg.message || "连接失败";
+    if (!state.session) setStatus("在线", "online");
+  } else if (msg.type === "incoming_call") {
+    showIncoming(msg);
+  } else if (msg.type === "call_pending") {
+    setStatus("等待对方同意…", "busy");
+    addChat("系统", `已向 ${msg.host_id_display || msg.host_id} 发起连接，等待对方同意`);
   } else if (msg.type === "session_start") {
+    const iAmHost = !!(state.deviceId && msg.host_id === state.deviceId);
     state.session = true;
+    state.role = iAmHost ? "host" : "viewer";
     $("connect-error").hidden = true;
-    $("session-title").textContent = `远程桌面 · ${msg.hostname || msg.host_id}`;
+    hideIncoming();
+    const peer = iAmHost
+      ? (msg.viewer_id_display || formatId(msg.viewer_id) || msg.viewer_name)
+      : (msg.host_id_display || formatId(msg.host_id) || msg.hostname);
+    $("session-title").textContent = iAmHost ? `正在被控制 · ${peer}` : `远程桌面 · ${peer}`;
+    if ($("stat-peer")) $("stat-peer").textContent = `对方 ${peer || "--"}`;
+    $("hosting-banner")?.classList.toggle("hidden", !iAmHost);
+    $("screen")?.classList.toggle("hidden", iAmHost);
     showView("session");
     setStatus("正在建立 P2P…", "busy");
-    addChat("系统", `信令已配对 ${msg.hostname || msg.host_id}，正在 P2P 直连`);
-    startP2P(msg).catch((err) => {
+    addChat("系统", iAmHost ? `已同意 ${peer}，正在共享本机画面` : `对方已同意，正在连接 ${peer}`);
+    const start = iAmHost ? startHostP2P(msg) : startP2P(msg);
+    start.catch((err) => {
       sendSignal({ type: "signal", kind: "failed", message: String(err) });
       sendSignal({ type: "hangup", reason: "p2p_failed" });
       endSession("P2P 直连失败");
     });
   } else if (msg.type === "session_end") {
-    endSession(msg.reason || "已断开");
+    const reason = msg.reason === "rejected"
+      ? "对方拒绝了连接"
+      : msg.reason === "timeout"
+        ? "对方未在时限内同意"
+        : (msg.reason || "已断开");
+    hideIncoming();
+    endSession(reason);
   } else if (msg.type === "signal") {
     handleSignal(msg);
   } else if (msg.type === "error") {
@@ -309,8 +400,77 @@ function onSessionMessage(data) {
   }
 }
 
+async function startHostP2P(session) {
+  closeP2P();
+  state.role = "host";
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 30, width: { max: 1280 }, height: { max: 720 } },
+      audio: false,
+    });
+  } catch {
+    sendSignal({ type: "hangup", reason: "screen_denied" });
+    endSession("未授权共享屏幕");
+    return;
+  }
+  state.displayStream = stream;
+  stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+    sendSignal({ type: "hangup", reason: "screen_ended" });
+    endSession("已停止共享屏幕");
+  });
+  const iceServers = session.ice_servers || state.iceServers || [];
+  const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: "all", bundlePolicy: "max-bundle" });
+  state.pc = pc;
+  stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+  await preferH264(pc);
+  pc.addEventListener("datachannel", (ev) => {
+    const dc = ev.channel;
+    dc.binaryType = "arraybuffer";
+    state.dc = dc;
+    dc.addEventListener("message", (e) => onSessionMessage(e.data));
+    dc.addEventListener("open", () => {
+      state.p2pReady = true;
+      state.connMethod = null;
+      setStatus("正在被控制", "busy");
+      startStats();
+      const settings = stream.getVideoTracks()[0]?.getSettings?.() || {};
+      sendSession({
+        type: "screen_info",
+        width: settings.width || 1280,
+        height: settings.height || 720,
+        backend: "web",
+      });
+      setTimeout(detectConnType, 600);
+      setTimeout(detectConnType, 1800);
+    });
+    dc.addEventListener("close", () => {
+      if (state.session) endSession("P2P 通道已关闭");
+    });
+  });
+  if (state.pendingOffer) {
+    const offer = state.pendingOffer;
+    state.pendingOffer = null;
+    await answerOffer(offer);
+  }
+}
+
+async function answerOffer(sdp) {
+  if (!state.pc) return;
+  await state.pc.setRemoteDescription(sdp);
+  const answer = await state.pc.createAnswer();
+  await state.pc.setLocalDescription(answer);
+  await waitGathering(state.pc);
+  sendSignal({
+    type: "signal",
+    kind: "answer",
+    sdp: { type: state.pc.localDescription.type, sdp: maybeStripRelay(state.pc.localDescription.sdp) },
+  });
+}
+
 async function startP2P(session) {
   closeP2P();
+  state.role = "viewer";
   const iceServers = session.ice_servers || state.iceServers || [];
   const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: "all", bundlePolicy: "max-bundle" });
   state.pc = pc;
@@ -371,6 +531,14 @@ async function startP2P(session) {
 }
 
 async function handleSignal(msg) {
+  if (msg.kind === "offer" && msg.sdp) {
+    if (!state.pc) {
+      state.pendingOffer = msg.sdp;
+      return;
+    }
+    await answerOffer(msg.sdp);
+    return;
+  }
   if (!state.pc || msg.kind !== "answer" || !msg.sdp) return;
   await state.pc.setRemoteDescription(msg.sdp);
 }
@@ -379,6 +547,11 @@ function closeP2P() {
   state.p2pReady = false;
   state.videoReceiver = null;
   state.lastQosAt = 0;
+  state.pendingOffer = null;
+  if (state.displayStream) {
+    try { state.displayStream.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
+    state.displayStream = null;
+  }
   const screen = $("screen");
   if (screen) screen.playbackRate = 1;
   stopStats();
@@ -397,11 +570,14 @@ function closeP2P() {
 function endSession(reason) {
   const wasSession = state.session;
   state.session = false;
+  state.role = null;
   $("nav-bar")?.classList.add("hidden");
+  $("hosting-banner")?.classList.add("hidden");
+  $("screen")?.classList.remove("hidden");
   closeP2P();
   if (wasSession) {
     showView("home");
-    setStatus("未连接", "offline");
+    setStatus(state.registered ? "在线" : "未连接", state.registered ? "online" : "offline");
     addChat("系统", reason);
   }
 }
@@ -428,12 +604,19 @@ async function pollStats() {
     let decTime = null; let decFrames = null;
     let rttMs = null;
     let selPairId = null;
+    const codecs = {};
+    let inCodec = null;
+    let outCodec = null;
     stats.forEach((r) => {
       if (r.type === "transport" && r.selectedCandidatePairId) selPairId = r.selectedCandidatePairId;
+      if (r.type === "codec" && r.mimeType) codecs[r.id] = String(r.mimeType).replace(/^video\//i, "").replace(/^audio\//i, "");
     });
     stats.forEach((r) => {
       if ((r.type === "inbound-rtp" && r.kind === "video") || r.type === "data-channel") {
         if (typeof r.bytesReceived === "number") bytes += r.bytesReceived;
+      }
+      if (r.type === "outbound-rtp" && r.kind === "video" && typeof r.bytesSent === "number") {
+        bytes += r.bytesSent;
       }
       if (r.type === "inbound-rtp" && r.kind === "video") {
         if (typeof r.framesPerSecond === "number") fps = r.framesPerSecond;
@@ -442,6 +625,10 @@ async function pollStats() {
         if (typeof r.jitterBufferEmittedCount === "number") jbCount = r.jitterBufferEmittedCount;
         if (typeof r.totalDecodeTime === "number") decTime = r.totalDecodeTime;
         if (typeof r.framesDecoded === "number") decFrames = r.framesDecoded;
+        if (r.codecId && codecs[r.codecId]) inCodec = codecs[r.codecId];
+      }
+      if (r.type === "outbound-rtp" && r.kind === "video" && r.codecId && codecs[r.codecId]) {
+        outCodec = codecs[r.codecId];
       }
       if (r.type === "candidate-pair" && typeof r.currentRoundTripTime === "number") {
         if ((selPairId && r.id === selPairId) || r.nominated || r.selected) rttMs = r.currentRoundTripTime * 1000;
@@ -482,6 +669,10 @@ async function pollStats() {
     $("stat-total").textContent = `历史 ${fmtBytes(Number(localStorage.getItem(TRAFFIC_KEY) || 0))}`;
     if (fps != null && $("stat-fps")) $("stat-fps").textContent = `${Math.round(fps)} FPS`;
     if (w) { state.screenW = w; state.screenH = h; $("stat-size").textContent = `${w}×${h}`; }
+    const codecBits = [];
+    if (outCodec) codecBits.push(`编码 ${outCodec.toUpperCase()}`);
+    if (inCodec) codecBits.push(`解码 ${inCodec.toUpperCase()}`);
+    if (codecBits.length && $("stat-codec")) $("stat-codec").textContent = codecBits.join(" · ");
   } catch { /* ignore */ }
 }
 
@@ -551,6 +742,18 @@ function bindInput() {
   });
 }
 
+function schedulePasswordRefresh() {
+  if (state.pwTimer) {
+    clearInterval(state.pwTimer);
+    state.pwTimer = null;
+  }
+  const sec = Number(localStorage.getItem(PW_REFRESH_KEY) || 0);
+  if (!sec) return;
+  state.pwTimer = setInterval(() => {
+    if (state.registered) sendSignal({ type: "refresh_password" });
+  }, sec * 1000);
+}
+
 async function connect() {
   $("connect-error").hidden = true;
   const deviceId = $("remote-id").value;
@@ -560,14 +763,20 @@ async function connect() {
     $("connect-error").textContent = "请填写识别码和密码";
     return;
   }
+  const target = String(deviceId).replace(/\D/g, "");
+  if (state.deviceId && target === state.deviceId) {
+    $("connect-error").hidden = false;
+    $("connect-error").textContent = "不能连接自己的远程码";
+    return;
+  }
   setStatus("正在连接…", "busy");
   try {
-    await ensureSocket();
+    await goOnline();
     sendSignal({
       type: "connect",
       device_id: deviceId,
       password,
-      name: $("viewer-name").value || "viewer",
+      name: $("viewer-name").value || "web",
     });
   } catch (err) {
     $("connect-error").hidden = false;
@@ -634,6 +843,15 @@ function bindUi() {
   });
   $("btn-connect").addEventListener("click", connect);
   $("btn-hangup").addEventListener("click", hangup);
+  $("btn-accept")?.addEventListener("click", () => answerCall(true));
+  $("btn-reject")?.addEventListener("click", () => answerCall(false));
+  $("btn-refresh-pw")?.addEventListener("click", () => {
+    if (state.registered) sendSignal({ type: "refresh_password" });
+  });
+  $("pw-refresh")?.addEventListener("change", (ev) => {
+    localStorage.setItem(PW_REFRESH_KEY, ev.target.value);
+    schedulePasswordRefresh();
+  });
   $("copy-local").addEventListener("click", async () => {
     const text = `${$("local-id").textContent} / ${$("local-pass").textContent}`;
     await navigator.clipboard.writeText(text);
@@ -669,5 +887,8 @@ function bindUi() {
   }, 2000);
 }
 
-loadConfig().catch(() => {});
+loadConfig()
+  .then(() => goOnline())
+  .then(() => schedulePasswordRefresh())
+  .catch(() => {});
 bindUi();

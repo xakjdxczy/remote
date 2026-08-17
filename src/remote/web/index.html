@@ -39,12 +39,23 @@
             <div id="local-id" class="device-id">--- --- ---</div>
             <div class="pass-row">
               <div>
-                <div class="id-label">临时密码</div>
+                <div class="id-label">连接密码</div>
                 <div id="local-pass" class="password">--------</div>
               </div>
               <button id="copy-local" class="ghost">复制连接信息</button>
             </div>
-            <p id="local-hint" class="hint">运行 <code>python -m remote host</code> 后，被控端会显示识别码和密码。</p>
+            <div class="pass-tools">
+              <button id="btn-refresh-pw" class="ghost" type="button">刷新密码</button>
+              <label class="inline-label">自动刷新
+                <select id="pw-refresh">
+                  <option value="0" selected>关闭（仅手动）</option>
+                  <option value="600">每 10 分钟</option>
+                  <option value="3600">每 1 小时</option>
+                  <option value="86400">每 24 小时</option>
+                </select>
+              </label>
+            </div>
+            <p id="local-hint" class="hint">本机远程码固定不变。默认不自动刷新密码，点「刷新密码」才会更换。</p>
           </article>
 
           <article class="card connect-card">
@@ -65,7 +76,10 @@
         <header class="topbar">
           <h1 id="session-title">远程桌面</h1>
           <div class="session-meta">
+            <span id="stat-peer">对方 --</span>
             <span id="stat-path">P2P</span>
+            <span id="stat-proto">--</span>
+            <span id="stat-codec">编解码 --</span>
             <span id="stat-fps">-- FPS</span>
             <span id="stat-speed">0 KB/s</span>
             <span id="stat-session">本次 0 MB</span>
@@ -87,6 +101,7 @@
             <div id="remote-cursor" class="remote-cursor hidden"></div>
             <div id="cursor-coord" class="cursor-coord hidden">0, 0</div>
           </div>
+          <div id="hosting-banner" class="hosting-banner hidden">正在共享本机画面，对方远程码见上方</div>
           <div class="stage-hint">移动鼠标控制对方，画面上的光标与坐标为当前鼠标位置（画面走 WebRTC 视频编码）</div>
         </div>
       </section>
@@ -119,7 +134,8 @@
           <ul class="bullets">
             <li>被控端必须由机主主动启动，离线后无法连接。</li>
             <li>连接需要识别码 + 密码，密码错误会被拒绝。</li>
-            <li>画面、键鼠、文件、聊天只走 P2P DataChannel。</li>
+            <li>每个网页端都有固定远程码，既能控制别人，也能被别人控制（需同意来电并共享屏幕）。</li>
+            <li>画面、键鼠、文件、聊天只走 P2P / 可选 TURN。</li>
             <li>同一时间一台主机只接受一个控制端。</li>
             <li>本软件用于授权协助，请勿用于未授权访问。</li>
           </ul>
@@ -127,6 +143,18 @@
       </section>
     </main>
   </div>
-  <script type="module" src="/static/js/app.js?v=lat1"></script>
+  <div id="incoming-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>远程协助请求</h2>
+      <p>对方远程码</p>
+      <div id="incoming-id" class="incoming-id">--- --- ---</div>
+      <p id="incoming-name" class="hint"></p>
+      <div class="modal-actions">
+        <button id="btn-accept" class="primary" type="button">同意</button>
+        <button id="btn-reject" class="ghost" type="button">拒绝</button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/static/js/app.js?v=dual1"></script>
 </body>
 </html>
