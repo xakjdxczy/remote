@@ -14,6 +14,17 @@ object HostState {
     @Volatile var sessionBytes: Long = 0
     @Volatile var totalBytes: Long = 0
     @Volatile var latencyMs: Int = -1
+    @Volatile var peerId: String = "--"
+    @Volatile var codec: String = "--"
+    @Volatile var proto: String = "--"
+    @Volatile var incoming: org.json.JSONObject? = null
+    @Volatile var incomingListener: ((org.json.JSONObject) -> Unit)? = null
+
+    @Volatile var signaling: SignalingClient? = null
+    @Volatile var hostPeer: WebRtcHost? = null
+    @Volatile var viewer: WebRtcViewer? = null
+    @Volatile var iceServers: List<org.webrtc.PeerConnection.IceServer> = emptyList()
+    @Volatile var myDeviceId: String = ""
 
     @Volatile var listener: (() -> Unit)? = null
 
@@ -29,6 +40,13 @@ object HostState {
         sessionBytes = session
         totalBytes = total
         latencyMs = latency
+        listener?.invoke()
+    }
+
+    fun setMedia(codec: String? = null, proto: String? = null, peerId: String? = null) {
+        if (codec != null) this.codec = codec
+        if (proto != null) this.proto = proto
+        if (peerId != null) this.peerId = peerId
         listener?.invoke()
     }
 

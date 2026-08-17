@@ -82,6 +82,44 @@
             android:text="开启无障碍（允许远程点击/滑动）"
             android:textColor="#EAF0FF" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="控制其他设备"
+            android:textColor="#9AA6C4"
+            android:textSize="12sp" />
+        <EditText
+            android:id="@+id/remote_id"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:background="#141B34"
+            android:hint="对方远程码"
+            android:inputType="number"
+            android:padding="12dp"
+            android:textColor="#EAF0FF"
+            android:textColorHint="#63708F" />
+        <EditText
+            android:id="@+id/remote_pass"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="#141B34"
+            android:hint="对方密码"
+            android:inputType="textPassword"
+            android:padding="12dp"
+            android:textColor="#EAF0FF"
+            android:textColorHint="#63708F" />
+        <Button
+            android:id="@+id/btn_connect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="#22E6C8"
+            android:text="连接对方"
+            android:textColor="#0B1022" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -127,7 +165,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:text="临时密码"
+                android:text="连接密码（默认不自动刷新）"
                 android:textColor="#9AA6C4"
                 android:textSize="12sp" />
 
@@ -146,10 +184,36 @@
                 android:layout_marginTop="14dp"
                 android:background="#22314F" />
 
+            <Button
+                android:id="@+id/btn_refresh_pw"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:backgroundTint="#2A3352"
+                android:text="手动刷新密码"
+                android:textColor="#EAF0FF" />
+            <Spinner
+                android:id="@+id/pw_refresh"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" />
+
             <TextView android:id="@+id/stat_method"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginTop="12dp" android:text="连接方式：--"
                 android:textColor="#22E6C8" android:textSize="14sp" />
+            <TextView android:id="@+id/stat_peer"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="6dp" android:text="对方远程码：--"
+                android:textColor="#FFD15C" android:textSize="14sp" />
+            <TextView android:id="@+id/stat_codec"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="6dp" android:text="编解码：--"
+                android:textColor="#EAF0FF" android:textSize="14sp" />
+            <TextView android:id="@+id/stat_proto"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="6dp" android:text="传输：--"
+                android:textColor="#EAF0FF" android:textSize="14sp" />
             <TextView android:id="@+id/stat_speed"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginTop="6dp" android:text="实时网速：--"

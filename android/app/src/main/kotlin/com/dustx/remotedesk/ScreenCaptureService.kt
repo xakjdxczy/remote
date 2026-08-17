@@ -39,6 +39,8 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
 
     private var signaling: SignalingClient? = null
     private var host: WebRtcHost? = null
+    var screenTrack: org.webrtc.VideoTrack? = null
+        private set
 
     private var statsThread: HandlerThread? = null
     private var statsHandler: Handler? = null
@@ -104,12 +106,37 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
         totalPersisted = getSharedPreferences("rd_traffic", Context.MODE_PRIVATE).getLong("total_bytes", 0L)
         computeDimensions()
 
-        Thread { iceServers = fetchIceServers(url) }.start()
+        instance = this
+        Thread {
+            iceServers = fetchIceServers(url)
+            HostState.iceServers = iceServers
+        }.start()
         startVideoCapture(data)
-        startSignaling(url)
+        if (HostState.signaling == null) startSignaling(url)
         startStatsLoop()
-        HostState.set(status = "正在连接信令…")
+        HostState.set(status = "录屏已就绪，等待连接")
         return START_STICKY
+    }
+
+    fun attachHost() {
+        host?.close()
+        lastSent = 0
+        val track = videoTrack
+        screenTrack = track
+        val h = WebRtcHost(
+            applicationContext, HostState.signaling ?: signaling ?: return,
+            if (HostState.iceServers.isNotEmpty()) HostState.iceServers else iceServers,
+            track, capW, capH, deviceW, deviceH,
+            onNeedKeyframe = {
+                try { capturer?.changeCaptureFormat(capW, capH, fps) } catch (e: Exception) {
+                    Log.w(TAG, "keyframe recapture: ${e.message}")
+                }
+            },
+        )
+        host = h
+        HostState.hostPeer = h
+        h.start()
+        HostState.set(status = "有人接入，正在建立 P2P…")
     }
 
     private fun computeDimensions() {
@@ -142,11 +169,13 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
         cap.initialize(surfaceHelper, applicationContext, src.capturerObserver)
         cap.startCapture(capW, capH, fps)
         videoTrack = factory.createVideoTrack("screen", src)
+        screenTrack = videoTrack
     }
 
     private fun startSignaling(url: String) {
-        val sig = SignalingClient(url, Build.MODEL ?: "Android", "Android ${Build.VERSION.RELEASE}", this)
+        val sig = SignalingClient(applicationContext, url, Build.MODEL ?: "Android", "Android ${Build.VERSION.RELEASE}", this)
         signaling = sig
+        HostState.signaling = sig
         sig.connect()
     }
 
@@ -165,18 +194,41 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
     private val statsCallback = RTCStatsCollectorCallback { report ->
         var sent = 0L
         var rttMs = -1
+        val codecs = HashMap<String, String>()
+        var outCodec: String? = null
+        var proto: String? = null
+        var pairId: String? = null
+        for (s in report.statsMap.values) {
+            if (s.type == "codec") {
+                (s.members["mimeType"] as? String)?.let { codecs[s.id] = it.substringAfter("/") }
+            }
+            if (s.type == "transport") {
+                pairId = s.members["selectedCandidatePairId"] as? String
+            }
+        }
         for (s in report.statsMap.values) {
             when (s.type) {
                 "outbound-rtp", "data-channel" -> {
                     (s.members["bytesSent"] as? Number)?.let { sent += it.toLong() }
+                    if (s.type == "outbound-rtp") {
+                        val cid = s.members["codecId"] as? String
+                        if (cid != null) outCodec = codecs[cid]
+                    }
                 }
                 "candidate-pair" -> {
                     val nominated = (s.members["nominated"] as? Boolean) ?: false
-                    if (nominated) {
+                    if (nominated || s.id == pairId) {
                         (s.members["currentRoundTripTime"] as? Number)?.let { rttMs = (it.toDouble() * 1000).toInt() }
                     }
                 }
+                "local-candidate", "remote-candidate" -> {
+                    val p = (s.members["relayProtocol"] as? String) ?: (s.members["protocol"] as? String)
+                    if (p != null) proto = p.uppercase()
+                }
             }
+        }
+        if (outCodec != null || proto != null) {
+            HostState.setMedia(codec = outCodec?.let { "编码 $it" }, proto = proto)
         }
         val now = System.currentTimeMillis()
         if (lastSent > 0 && sent >= lastSent) {
@@ -199,29 +251,36 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
 
     // ---- SignalingClient.Callbacks --------------------------------------
     override fun onRegistered(deviceId: String, password: String) {
+        HostState.myDeviceId = deviceId
         HostState.set(status = "在线，等待连接", deviceId = deviceId, password = password)
     }
 
+    override fun onIncomingCall(msg: JSONObject) {
+        HostState.incoming = msg
+        HostState.incomingListener?.invoke(msg)
+        HostState.set(status = "来电 ${msg.optString("viewer_id_display")}")
+    }
+    override fun onCallPending(msg: JSONObject) {
+        HostState.set(status = "等待对方同意…")
+    }
+    override fun onPassword(password: String) {
+        HostState.set(password = password)
+    }
     override fun onSessionStart(msg: JSONObject) {
-        host?.close()
-        lastSent = 0
-        val h = WebRtcHost(
-            applicationContext, signaling!!, iceServers, videoTrack, capW, capH, deviceW, deviceH,
-            onNeedKeyframe = {
-                try { capturer?.changeCaptureFormat(capW, capH, fps) } catch (e: Exception) {
-                    Log.w(TAG, "keyframe recapture: ${e.message}")
-                }
-            },
-        )
-        host = h
-        h.start()
-        HostState.set(status = "有人接入，正在建立 P2P…")
+        val myId = HostState.myDeviceId
+        if (myId.isNotEmpty() && msg.optString("host_id") != myId) return
+        HostState.setMedia(peerId = msg.optString("viewer_id_display").ifEmpty { msg.optString("viewer_name") })
+        attachHost()
     }
 
-    override fun onSignal(msg: JSONObject) { host?.onSignal(msg) }
+    override fun onSignal(msg: JSONObject) {
+        host?.onSignal(msg)
+        HostState.viewer?.onSignal(msg)
+    }
 
     override fun onSessionEnd(reason: String) {
         host?.close(); host = null
+        HostState.hostPeer = null
         HostState.set(status = "在线，等待连接")
     }
 
@@ -247,17 +306,22 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
 
     override fun onDestroy() {
         try { statsThread?.quitSafely() } catch (_: Exception) {}
-        try { signaling?.close() } catch (_: Exception) {}
+        if (signaling != null && signaling !== HostState.signaling) {
+            try { signaling?.close() } catch (_: Exception) {}
+        }
         try { host?.close() } catch (_: Exception) {}
         try { capturer?.stopCapture() } catch (_: Exception) {}
         try { capturer?.dispose() } catch (_: Exception) {}
         try { videoSource?.dispose() } catch (_: Exception) {}
         try { surfaceHelper?.dispose() } catch (_: Exception) {}
-        HostState.set(status = "未连接", deviceId = "", password = "")
+        if (instance === this) instance = null
+        HostState.hostPeer = null
+        HostState.set(status = "在线，等待连接")
         super.onDestroy()
     }
 
     companion object {
+        @Volatile var instance: ScreenCaptureService? = null
         private const val TAG = "RD.Capture"
         private const val CHANNEL = "rd_capture"
         private const val NOTIF_ID = 1001

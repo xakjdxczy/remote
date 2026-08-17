@@ -206,6 +206,8 @@ class WebRtcHost(
                 "conn_info" -> {
                     relayPath = msg.optString("method") == "relay"
                     HostState.connMethod = if (relayPath) "TURN 中继" else "P2P 直连"
+                    val proto = msg.optString("protocol").uppercase()
+                    if (proto.isNotEmpty()) HostState.setMedia(proto = proto)
                     main.post { applySenderParams(if (relayPath) TURN_MAX_BPS else P2P_MAX_BPS) }
                     HostState.set()
                 }

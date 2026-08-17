@@ -1,5 +1,6 @@
 package com.dustx.remotedesk
 
+import android.content.Context
 import android.util.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -9,8 +10,9 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-/** Thin WebSocket signaling client speaking the RemoteDesk protocol as a host. */
+/** WebSocket signaling: every Android client is both host and viewer. */
 class SignalingClient(
+    private val appContext: Context,
     private val url: String,
     private val hostname: String,
     private val osName: String,
@@ -18,9 +20,12 @@ class SignalingClient(
 ) {
     interface Callbacks {
         fun onRegistered(deviceId: String, password: String)
+        fun onIncomingCall(msg: JSONObject)
+        fun onCallPending(msg: JSONObject)
         fun onSessionStart(msg: JSONObject)
         fun onSignal(msg: JSONObject)
         fun onSessionEnd(reason: String)
+        fun onPassword(password: String)
         fun onClosed()
     }
 
@@ -29,7 +34,6 @@ class SignalingClient(
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
     private var ws: WebSocket? = null
-    val password = Ids.genPassword()
 
     fun connect() {
         val req = Request.Builder().url(url).build()
@@ -40,7 +44,8 @@ class SignalingClient(
                     .put("role", "host")
                     .put("hostname", hostname)
                     .put("os", osName)
-                    .put("temp_password", password)
+                    .put("device_id", DeviceStore.deviceId(appContext))
+                    .put("temp_password", DeviceStore.password(appContext))
                 webSocket.send(reg.toString())
             }
 
@@ -59,13 +64,48 @@ class SignalingClient(
         ws?.send(obj.toString())
     }
 
+    fun connectTo(deviceId: String, password: String, name: String) {
+        send(
+            JSONObject()
+                .put("type", "connect")
+                .put("device_id", deviceId)
+                .put("password", password)
+                .put("name", name)
+        )
+    }
+
+    fun answerCall(sessionId: String, ok: Boolean) {
+        send(JSONObject().put("type", "auth_result").put("session_id", sessionId).put("ok", ok))
+    }
+
+    fun refreshPassword() {
+        send(JSONObject().put("type", "refresh_password"))
+    }
+
+    fun hangup(reason: String = "hangup") {
+        send(JSONObject().put("type", "hangup").put("reason", reason))
+    }
+
     private fun handle(text: String) {
         val msg = try { JSONObject(text) } catch (e: Exception) { return }
         when (msg.optString("type")) {
-            "registered" -> cb.onRegistered(msg.optString("device_id"), msg.optString("temp_password"))
+            "registered" -> {
+                val id = msg.optString("device_id")
+                val pw = msg.optString("temp_password")
+                DeviceStore.save(appContext, id, pw)
+                cb.onRegistered(id, pw)
+            }
+            "password" -> {
+                val pw = msg.optString("temp_password")
+                DeviceStore.save(appContext, DeviceStore.deviceId(appContext), pw)
+                cb.onPassword(pw)
+            }
+            "incoming_call" -> cb.onIncomingCall(msg)
+            "call_pending" -> cb.onCallPending(msg)
             "session_start" -> cb.onSessionStart(msg)
             "signal" -> cb.onSignal(msg)
             "session_end" -> cb.onSessionEnd(msg.optString("reason"))
+            "auth_failed" -> cb.onSessionEnd(msg.optString("message").ifEmpty { "auth_failed" })
         }
     }
 
