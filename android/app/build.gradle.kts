@@ -11,8 +11,8 @@ android {
         applicationId = "com.dustx.remotedesk"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 7
+        versionName = "1.1.0"
     }
 
     buildTypes {
@@ -27,6 +27,9 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+    buildFeatures {
+        buildConfig = true
     }
     sourceSets["main"].java.srcDirs("src/main/kotlin")
 }

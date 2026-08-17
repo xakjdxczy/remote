@@ -33,6 +33,13 @@ gradle :app:assembleDebug        # 或 ./gradlew（先 gradle wrapper 生成 wra
 - 无障碍（AccessibilityService，`canPerformGestures`）：Android 仅允许无障碍服务合成触摸事件，因此远程点击/滑动需要用户手动启用一次。
 - 前台服务（mediaProjection 类型）+ 通知：保证后台持续捕获。
 
+## 版本号
+
+- 版本在 `app/build.gradle.kts` 的 `versionName`(展示,如 `1.1.0`)与 `versionCode`(整数,每次发布 +1)。
+- App 首页会显示 `版本 v<versionName> (<versionCode>)`,方便确认装的是哪一版。
+- **约定:每次发布 APK 前都递增 `versionCode`(+1)并更新 `versionName`。**
+- 当前:`1.1.0 (7)`。
+
 ## 说明
 
 - 文本/物理按键注入在移动端受限，当前实现聚焦触摸（点击/滑动/滚动）。

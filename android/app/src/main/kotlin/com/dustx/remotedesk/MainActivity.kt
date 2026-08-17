@@ -39,6 +39,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        findViewById<TextView>(R.id.app_version).text =
+            "版本 v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+
         serverUrl = findViewById(R.id.server_url)
         statusView = findViewById(R.id.status)
         deviceIdView = findViewById(R.id.device_id)
