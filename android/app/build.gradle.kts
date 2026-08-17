@@ -11,8 +11,8 @@ android {
         applicationId = "com.dustx.remotedesk"
         minSdk = 29
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.4.0"
+        versionCode = 12
+        versionName = "1.6.0"
     }
 
     buildTypes {

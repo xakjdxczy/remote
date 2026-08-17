@@ -117,6 +117,7 @@ class HostAgent:
         self._peer: HostPeer | None = None
         self._traffic_total = load_traffic_total()
         self._rtt: int | None = None
+        self._relay_path = False
 
     async def run_forever(self) -> None:
         while not self._stop.is_set():
@@ -251,6 +252,7 @@ class HostAgent:
         if self._peer:
             await self._peer.close()
         self.session_id = msg.get("session_id")
+        self._relay_path = False
         logger.info("session started by %s (P2P only)", msg.get("viewer_name"))
 
         async def send_signal(payload: dict) -> None:
@@ -308,9 +310,20 @@ class HostAgent:
             print(f"  [导航] {msg.get('action')}", flush=True)
             logger.info("nav action: %s", msg.get("action"))
         elif kind == "conn_info":
-            method = "TURN 中继（经服务器转发）" if msg.get("method") == "relay" else "P2P 直连"
+            relay = msg.get("method") == "relay"
+            self._relay_path = relay
+            method = "TURN 中继（经服务器转发）" if relay else "P2P 直连"
             print(f"  [连接方式] {method}", flush=True)
             logger.info("connection method: %s", msg.get("method"))
+            if self._peer:
+                asyncio.create_task(self._peer.apply_bitrate(relay=relay))
+        elif kind == "qos":
+            buf = msg.get("buffer_ms")
+            action = msg.get("action")
+            print(f"  [QoS] 缓冲 {buf} ms · {action}", flush=True)
+            logger.info("qos buffer=%s action=%s", buf, action)
+            if self._peer:
+                asyncio.create_task(self._peer.apply_bitrate(relay=self._relay_path, stressed=True))
         elif kind == "chat":
             print(f"  [聊天] {msg.get('from', 'viewer')}: {msg.get('text')}", flush=True)
         elif kind == "ping":

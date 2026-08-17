@@ -17,6 +17,7 @@ from typing import Any
 
 from aiortc import VideoStreamTrack
 
+from remote.latency import apply_video_bitrate_fmtp, video_bitrate_kbps
 from remote.p2p import maybe_strip_relay, rtc_configuration, wait_ice_complete
 
 logger = logging.getLogger("remotedesk.host.webrtc")
@@ -118,6 +119,28 @@ class HostPeer:
             return
         self.channel.send(data)
 
+    async def apply_bitrate(self, *, relay: bool, stressed: bool = False) -> None:
+        """Cap the outbound video encoder when the peer API supports it."""
+        _min_k, _start_k, max_k = video_bitrate_kbps(relay=relay, stressed=stressed)
+        max_bps = max_k * 1000
+        for sender in self.pc.getSenders():
+            track = getattr(sender, "track", None)
+            if not track or getattr(track, "kind", None) != "video":
+                continue
+            try:
+                params = sender.getParameters()
+            except Exception:
+                continue
+            encodings = getattr(params, "encodings", None) or []
+            if not encodings:
+                continue
+            try:
+                encodings[0].maxBitrate = max_bps
+                await sender.setParameters(params)
+                logger.info("video maxBitrate=%s (relay=%s stressed=%s)", max_bps, relay, stressed)
+            except Exception as exc:
+                logger.info("setParameters skipped: %s", exc)
+
     async def handle_signal(self, msg: dict[str, Any]) -> None:
         from aiortc import RTCSessionDescription
 
@@ -131,15 +154,18 @@ class HostPeer:
             if self._source is not None and self._track is None:
                 self._track = ScreenVideoTrack(self._source, self._fps)
                 self.pc.addTrack(self._track)
+            await self.apply_bitrate(relay=False)
             answer = await self.pc.createAnswer()
             await self.pc.setLocalDescription(answer)
             await wait_ice_complete(self.pc)
             local = self.pc.localDescription
+            min_k, start_k, max_k = video_bitrate_kbps(relay=False)
+            sdp = apply_video_bitrate_fmtp(maybe_strip_relay(local.sdp), min_k, start_k, max_k)
             await self._send_signal(
                 {
                     "type": "signal",
                     "kind": "answer",
-                    "sdp": {"type": local.type, "sdp": maybe_strip_relay(local.sdp)},
+                    "sdp": {"type": local.type, "sdp": sdp},
                 }
             )
         elif kind == "failed":

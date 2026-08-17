@@ -205,7 +205,14 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
     override fun onSessionStart(msg: JSONObject) {
         host?.close()
         lastSent = 0
-        val h = WebRtcHost(applicationContext, signaling!!, iceServers, videoTrack, capW, capH, deviceW, deviceH)
+        val h = WebRtcHost(
+            applicationContext, signaling!!, iceServers, videoTrack, capW, capH, deviceW, deviceH,
+            onNeedKeyframe = {
+                try { capturer?.changeCaptureFormat(capW, capH, fps) } catch (e: Exception) {
+                    Log.w(TAG, "keyframe recapture: ${e.message}")
+                }
+            },
+        )
         host = h
         h.start()
         HostState.set(status = "有人接入，正在建立 P2P…")
