@@ -73,13 +73,16 @@ class WebRtcHost(
                 if (videoTrack != null) {
                     try {
                         val sender = peer.addTrack(videoTrack, listOf("rd-stream"))
-                        // Prioritise smoothness: keep framerate, allow a high bitrate ceiling.
+                        // Latency-first: keep framerate but cap the bitrate so it stays
+                        // under a constrained uplink. A lower ceiling + low floor lets
+                        // congestion control back off quickly, which prevents the
+                        // receiver jitter buffer from ballooning to hundreds of ms.
                         val p = sender.parameters
                         p.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
                         if (p.encodings.isNotEmpty()) {
                             p.encodings[0].maxFramerate = 30
-                            p.encodings[0].minBitrateBps = 1_000_000
-                            p.encodings[0].maxBitrateBps = 4_000_000
+                            p.encodings[0].minBitrateBps = 500_000
+                            p.encodings[0].maxBitrateBps = 2_500_000
                         }
                         sender.parameters = p
                     } catch (e: Exception) {
