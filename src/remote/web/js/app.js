@@ -357,7 +357,11 @@ async function startP2P(session) {
   const offer = await pc.createOffer();
   // Conservative start (TURN is common). Host raises the cap on P2P via conn_info.
   const offerSdp = applyVideoBitrateFmtp(offer.sdp || "", 250, 500, 1200);
-  await pc.setLocalDescription({ type: offer.type, sdp: offerSdp });
+  try {
+    await pc.setLocalDescription({ type: offer.type, sdp: offerSdp });
+  } catch {
+    await pc.setLocalDescription(offer);
+  }
   await waitGathering(pc);
   sendSignal({
     type: "signal",
