@@ -375,6 +375,21 @@ function canvasPoint(ev) {
   return { x: Math.round(x), y: Math.round(y) };
 }
 
+function updateCursorOverlay(ev, p) {
+  const el = $("screen");
+  const rect = el.getBoundingClientRect();
+  const x = ev.clientX - rect.left;
+  const y = ev.clientY - rect.top;
+  const cur = $("remote-cursor");
+  const lbl = $("cursor-coord");
+  if (cur) { cur.style.left = `${x}px`; cur.style.top = `${y}px`; cur.classList.remove("hidden"); }
+  if (lbl) { lbl.style.left = `${x}px`; lbl.style.top = `${y}px`; lbl.textContent = `${p.x}, ${p.y}`; lbl.classList.remove("hidden"); }
+}
+function hideCursorOverlay() {
+  $("remote-cursor")?.classList.add("hidden");
+  $("cursor-coord")?.classList.add("hidden");
+}
+
 function bindInput() {
   const canvas = $("screen");
   const sendInput = (payload) => {
@@ -383,8 +398,11 @@ function bindInput() {
   };
   canvas.addEventListener("mousemove", (ev) => {
     const p = canvasPoint(ev);
+    updateCursorOverlay(ev, p);
     sendInput({ event: "move", x: p.x, y: p.y });
   });
+  canvas.addEventListener("mouseenter", (ev) => updateCursorOverlay(ev, canvasPoint(ev)));
+  canvas.addEventListener("mouseleave", hideCursorOverlay);
   canvas.addEventListener("mousedown", (ev) => {
     ev.preventDefault();
     canvas.focus();
