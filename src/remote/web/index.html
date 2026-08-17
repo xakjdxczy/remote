@@ -76,8 +76,12 @@
           </div>
         </header>
         <div class="stage">
-          <video id="screen" tabindex="0" autoplay playsinline muted></video>
-          <div class="stage-hint">点击画面后即可用键鼠控制对方桌面（画面走 WebRTC 视频编码）</div>
+          <div class="screen-wrap">
+            <video id="screen" tabindex="0" autoplay playsinline muted></video>
+            <div id="remote-cursor" class="remote-cursor hidden"></div>
+            <div id="cursor-coord" class="cursor-coord hidden">0, 0</div>
+          </div>
+          <div class="stage-hint">移动鼠标控制对方，画面上的光标与坐标为当前鼠标位置（画面走 WebRTC 视频编码）</div>
         </div>
       </section>
 
