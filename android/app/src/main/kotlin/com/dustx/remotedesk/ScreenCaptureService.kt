@@ -116,7 +116,8 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
         val dm: DisplayMetrics = resources.displayMetrics
         deviceW = dm.widthPixels
         deviceH = dm.heightPixels
-        val maxW = 720
+        // 540p keeps latency/bandwidth low while staying legible for control.
+        val maxW = 540
         if (deviceW <= maxW) { capW = deviceW; capH = deviceH }
         else { capW = maxW; capH = (deviceH.toLong() * maxW / deviceW).toInt() }
         if (capW % 2 == 1) capW -= 1
