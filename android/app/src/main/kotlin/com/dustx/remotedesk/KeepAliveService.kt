@@ -92,7 +92,7 @@ class KeepAliveService : Service(), SignalingClient.Callbacks {
     }
 
     private val reconnectTask = Runnable {
-        if (userStopped) return
+        if (userStopped) return@Runnable
         Log.i(TAG, "reconnecting signaling")
         connectNow()
     }
