@@ -2,7 +2,9 @@ package com.dustx.remotedesk
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Context
 import android.graphics.Path
+import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 
@@ -30,15 +32,25 @@ class InputAccessibilityService : AccessibilityService() {
 
         val isEnabled: Boolean get() = instance != null
 
+        /** Whether the user has switched this accessibility service ON in Settings. */
+        fun isConfigured(ctx: Context): Boolean {
+            val s = Settings.Secure.getString(
+                ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: return false
+            return s.split(':').any { it.contains(ctx.packageName + "/") }
+        }
+
         fun tap(x: Int, y: Int) {
-            val svc = instance ?: return
+            val svc = instance
+            if (svc == null) { Log.w(TAG, "tap ignored: accessibility not connected"); return }
             val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
             val stroke = GestureDescription.StrokeDescription(path, 0, 60)
             svc.dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
         }
 
         fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long = 220) {
-            val svc = instance ?: return
+            val svc = instance
+            if (svc == null) { Log.w(TAG, "swipe ignored: accessibility not connected"); return }
             val path = Path().apply {
                 moveTo(x1.toFloat(), y1.toFloat())
                 lineTo(x2.toFloat(), y2.toFloat())

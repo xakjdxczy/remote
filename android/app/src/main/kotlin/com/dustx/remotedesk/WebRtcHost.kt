@@ -15,6 +15,7 @@ import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RTCStatsCollectorCallback
+import org.webrtc.RtpParameters
 import org.webrtc.RtpReceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
@@ -69,7 +70,20 @@ class WebRtcHost(
         peer.setRemoteDescription(object : SimpleSdp() {
             override fun onSetSuccess() {
                 if (videoTrack != null) {
-                    try { peer.addTrack(videoTrack, listOf("rd-stream")) } catch (e: Exception) { Log.w(TAG, "addTrack: ${e.message}") }
+                    try {
+                        val sender = peer.addTrack(videoTrack, listOf("rd-stream"))
+                        // Prioritise smoothness: keep framerate, allow a high bitrate ceiling.
+                        val p = sender.parameters
+                        p.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
+                        if (p.encodings.isNotEmpty()) {
+                            p.encodings[0].maxFramerate = 30
+                            p.encodings[0].minBitrateBps = 800_000
+                            p.encodings[0].maxBitrateBps = 6_000_000
+                        }
+                        sender.parameters = p
+                    } catch (e: Exception) {
+                        Log.w(TAG, "addTrack/params: ${e.message}")
+                    }
                 }
                 peer.createAnswer(object : SimpleSdp() {
                     override fun onCreateSuccess(desc: SessionDescription) {
@@ -165,7 +179,9 @@ class WebRtcHost(
 
     private fun handleInput(msg: JSONObject) {
         val (dx, dy) = toDevice(msg.optInt("x"), msg.optInt("y"))
-        when (msg.optString("event")) {
+        val ev = msg.optString("event")
+        Log.d(TAG, "input $ev dev=($dx,$dy) accessibility=${InputAccessibilityService.isEnabled}")
+        when (ev) {
             "down" -> { pressX = dx; pressY = dy }
             "up" -> {
                 val slop = (20L * deviceW / reportedW).toInt().coerceAtLeast(12)

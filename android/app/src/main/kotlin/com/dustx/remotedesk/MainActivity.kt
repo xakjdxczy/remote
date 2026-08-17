@@ -75,6 +75,11 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.stat_total).text = "历史流量：${HostState.fmtBytes(HostState.totalBytes)}"
         findViewById<TextView>(R.id.stat_latency).text =
             "延迟：" + (if (HostState.latencyMs >= 0) "${HostState.latencyMs} ms" else "-- ms")
+        val access = InputAccessibilityService.isConfigured(this)
+        findViewById<TextView>(R.id.stat_access).apply {
+            text = "远程操作(无障碍)：" + if (access) "已开启" else "未开启（点上方按钮开启才能被远程点击）"
+            setTextColor(if (access) 0xFF22E6C8.toInt() else 0xFFFF6B8B.toInt())
+        }
     }
 
     override fun onResume() {
