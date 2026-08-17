@@ -23,7 +23,70 @@ const state = {
   lastJbCount: 0,
   lastDecTime: 0,
   lastDecFrames: 0,
+  videoReceiver: null,
+  lastQosAt: 0,
 };
+
+// Chrome treats jitterBufferTarget=0 as "unset" on some versions and then
+// keeps ~100ms. 16ms is a real low-latency target (half a 30fps frame).
+const JB_TARGET_MS = 16;
+const QOS_THROTTLE_MS = 1500;
+
+function playbackRateForBuffer(jbMs) {
+  if (jbMs >= 200) return 1.35;
+  if (jbMs >= 120) return 1.18;
+  if (jbMs >= 70) return 1.08;
+  return 1;
+}
+
+function applyLowLatencyReceiver(receiver) {
+  if (!receiver) return;
+  try { receiver.playoutDelayHint = 0; } catch { /* not supported */ }
+  try { receiver.jitterBufferTarget = JB_TARGET_MS; } catch { /* not supported */ }
+}
+
+function applyVideoBitrateFmtp(sdp, minKbps, startKbps, maxKbps) {
+  const extra = `x-google-min-bitrate=${minKbps};x-google-start-bitrate=${startKbps};x-google-max-bitrate=${maxKbps}`;
+  const nl = sdp.includes("\r\n") ? "\r\n" : "\n";
+  let inVideo = false;
+  return sdp.replace(/\r\n/g, "\n").split("\n").map((line) => {
+    if (line.startsWith("m=")) inVideo = line.startsWith("m=video");
+    if (inVideo && line.startsWith("a=fmtp:") && !line.includes("x-google-max-bitrate") && !line.includes("apt=")) {
+      return `${line};${extra}`;
+    }
+    return line;
+  }).join(nl);
+}
+
+async function preferH264(pc) {
+  const caps = RTCRtpReceiver.getCapabilities?.("video");
+  if (!caps || !caps.codecs) return;
+  const h264 = caps.codecs.filter((c) => /h264/i.test(c.mimeType));
+  if (!h264.length) return;
+  const rest = caps.codecs.filter((c) => !/h264/i.test(c.mimeType));
+  for (const t of pc.getTransceivers()) {
+    if (t.receiver && (t.receiver.track == null || t.receiver.track.kind === "video")) {
+      try { t.setCodecPreferences([...h264, ...rest]); } catch { /* not supported */ }
+    }
+  }
+}
+
+function applyCatchup(jbMs) {
+  const v = $("screen");
+  if (v) {
+    const rate = playbackRateForBuffer(jbMs);
+    if (Math.abs((v.playbackRate || 1) - rate) > 0.01) v.playbackRate = rate;
+  }
+  applyLowLatencyReceiver(state.videoReceiver);
+  const now = Date.now();
+  if (jbMs >= 180 && now - state.lastQosAt >= QOS_THROTTLE_MS) {
+    state.lastQosAt = now;
+    sendSession({ type: "qos", buffer_ms: Math.round(jbMs), action: "keyframe" });
+  } else if (jbMs >= 120 && now - state.lastQosAt >= QOS_THROTTLE_MS) {
+    state.lastQosAt = now;
+    sendSession({ type: "qos", buffer_ms: Math.round(jbMs), action: "backoff" });
+  }
+}
 
 const TRAFFIC_KEY = "dustx_traffic_total_bytes";
 function fmtBytes(n) {
@@ -249,20 +312,23 @@ function onSessionMessage(data) {
 async function startP2P(session) {
   closeP2P();
   const iceServers = session.ice_servers || state.iceServers || [];
-  const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: "all" });
+  const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: "all", bundlePolicy: "max-bundle" });
   state.pc = pc;
   const dc = pc.createDataChannel("session", { ordered: true });
   dc.binaryType = "arraybuffer";
   state.dc = dc;
   // Receive the screen as a WebRTC video track.
   pc.addTransceiver("video", { direction: "recvonly" });
+  await preferH264(pc);
   pc.addEventListener("track", (ev) => {
-    // Minimise the receive jitter buffer for near-real-time remote control.
-    try { ev.receiver.playoutDelayHint = 0; } catch { /* not supported */ }
-    try { ev.receiver.jitterBufferTarget = 0; } catch { /* not supported */ }
+    state.videoReceiver = ev.receiver;
+    applyLowLatencyReceiver(ev.receiver);
     const v = $("screen");
     if (v && ev.streams && ev.streams[0]) {
       v.srcObject = ev.streams[0];
+      v.playsInline = true;
+      v.muted = true;
+      v.playbackRate = 1;
       const p = v.play();
       if (p && p.catch) p.catch(() => {});
     }
@@ -289,7 +355,9 @@ async function startP2P(session) {
     }
   });
   const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+  // Conservative start (TURN is common). Host raises the cap on P2P via conn_info.
+  const offerSdp = applyVideoBitrateFmtp(offer.sdp || "", 250, 500, 1200);
+  await pc.setLocalDescription({ type: offer.type, sdp: offerSdp });
   await waitGathering(pc);
   sendSignal({
     type: "signal",
@@ -305,6 +373,10 @@ async function handleSignal(msg) {
 
 function closeP2P() {
   state.p2pReady = false;
+  state.videoReceiver = null;
+  state.lastQosAt = 0;
+  const screen = $("screen");
+  if (screen) screen.playbackRate = 1;
   stopStats();
   const v = $("screen");
   if (v) { try { v.srcObject = null; } catch { /* ignore */ } }
@@ -336,7 +408,7 @@ function startStats() {
   state.lastBytes = 0;
   state.lastStatsAt = Date.now();
   state.sessionBytes = 0;
-  state.statsTimer = setInterval(pollStats, 1000);
+  state.statsTimer = setInterval(pollStats, 400);
 }
 function stopStats() {
   if (state.statsTimer) { clearInterval(state.statsTimer); state.statsTimer = null; }
@@ -384,7 +456,10 @@ async function pollStats() {
     }
     const parts = [];
     if (rttMs != null) parts.push(`网络${Math.round(rttMs)}`);
-    if (jbMs != null) parts.push(`缓冲${Math.round(jbMs)}`);
+    if (jbMs != null) {
+      parts.push(`缓冲${Math.round(jbMs)}`);
+      applyCatchup(jbMs);
+    }
     if (decMs != null) parts.push(`解码${Math.round(decMs)}`);
     if (parts.length && $("stat-rtt")) $("stat-rtt").textContent = parts.join("·") + " ms";
     const now = Date.now();
