@@ -116,8 +116,11 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
         val dm: DisplayMetrics = resources.displayMetrics
         deviceW = dm.widthPixels
         deviceH = dm.heightPixels
-        // 720p for clearer picture; smoothness kept via 30fps + H.264 + bitrate.
-        val maxW = 720
+        // 540p: keeps frames + keyframes small enough to fit a mobile uplink so
+        // complex/animated screens don't burst past the link and collapse. Data
+        // showed 720p interactive bursts caused heavy packet loss + keyframe
+        // death-spiral; 540p recovers fast. Smoothness kept via 30fps + H.264.
+        val maxW = 540
         if (deviceW <= maxW) { capW = deviceW; capH = deviceH }
         else { capW = maxW; capH = (deviceH.toLong() * maxW / deviceW).toInt() }
         if (capW % 2 == 1) capW -= 1

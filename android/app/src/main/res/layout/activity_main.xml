@@ -175,7 +175,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
-                android:text="在电脑/手机浏览器打开控制端网页，输入以上识别码与密码即可远程控制本机。画面走 WebRTC 视频编码(H.264/VP8)，30fps，720p 低延迟。"
+                android:text="在电脑/手机浏览器打开控制端网页，输入以上识别码与密码即可远程控制本机。画面走 WebRTC 视频编码(H.264/VP8)，30fps，540p 自适应低延迟。"
                 android:textColor="#63708F"
                 android:textSize="12sp" />
         </LinearLayout>
