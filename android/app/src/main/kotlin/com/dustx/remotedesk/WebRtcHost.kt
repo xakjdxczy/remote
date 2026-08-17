@@ -78,8 +78,8 @@ class WebRtcHost(
                         p.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
                         if (p.encodings.isNotEmpty()) {
                             p.encodings[0].maxFramerate = 30
-                            p.encodings[0].minBitrateBps = 500_000
-                            p.encodings[0].maxBitrateBps = 2_500_000
+                            p.encodings[0].minBitrateBps = 1_000_000
+                            p.encodings[0].maxBitrateBps = 4_000_000
                         }
                         sender.parameters = p
                     } catch (e: Exception) {
