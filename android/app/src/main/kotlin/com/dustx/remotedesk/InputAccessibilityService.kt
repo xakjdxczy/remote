@@ -40,6 +40,20 @@ class InputAccessibilityService : AccessibilityService() {
             return s.split(':').any { it.contains(ctx.packageName + "/") }
         }
 
+        /** System navigation via accessibility global actions (no edge-swipe needed). */
+        fun global(action: String) {
+            val svc = instance
+            if (svc == null) { Log.w(TAG, "nav ignored: accessibility not connected"); return }
+            val code = when (action) {
+                "back" -> AccessibilityService.GLOBAL_ACTION_BACK
+                "home" -> AccessibilityService.GLOBAL_ACTION_HOME
+                "recents" -> AccessibilityService.GLOBAL_ACTION_RECENTS
+                "notifications" -> AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS
+                else -> return
+            }
+            svc.performGlobalAction(code)
+        }
+
         fun tap(x: Int, y: Int) {
             val svc = instance
             if (svc == null) { Log.w(TAG, "tap ignored: accessibility not connected"); return }

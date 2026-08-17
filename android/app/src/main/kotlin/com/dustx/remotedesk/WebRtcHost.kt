@@ -12,6 +12,7 @@ import org.webrtc.EglBase
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
+import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RTCStatsCollectorCallback
@@ -83,6 +84,16 @@ class WebRtcHost(
                         sender.parameters = p
                     } catch (e: Exception) {
                         Log.w(TAG, "addTrack/params: ${e.message}")
+                    }
+                    // Prefer hardware H.264 (usually smoother/cheaper than SW VP8).
+                    try {
+                        val caps = peerFactory().getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO)
+                        val ordered = caps.codecs.sortedByDescending { it.name.equals("H264", true) }
+                        peer.transceivers
+                            .firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+                            ?.setCodecPreferences(ordered)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "codec pref: ${e.message}")
                     }
                 }
                 peer.createAnswer(object : SimpleSdp() {
@@ -162,6 +173,7 @@ class WebRtcHost(
             val msg = try { JSONObject(String(arr, Charsets.UTF_8)) } catch (e: Exception) { return }
             when (msg.optString("type")) {
                 "input" -> handleInput(msg)
+                "nav" -> InputAccessibilityService.global(msg.optString("action"))
                 "ping" -> sendJson(JSONObject().put("type", "pong").put("t", msg.opt("t")))
                 "conn_info" -> {
                     HostState.connMethod = if (msg.optString("method") == "relay") "TURN 中继" else "P2P 直连"
@@ -226,6 +238,7 @@ class WebRtcHost(
         }
 
         fun egl(): EglBase = eglBase!!
+        fun peerFactory(): PeerConnectionFactory = factory!!
     }
 }
 

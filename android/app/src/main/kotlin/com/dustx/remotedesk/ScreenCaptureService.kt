@@ -132,6 +132,8 @@ class ScreenCaptureService : Service(), SignalingClient.Callbacks {
         capturer = cap
         val src = factory.createVideoSource(true) // isScreencast
         videoSource = src
+        // Lock the output format so the encoder keeps capW x capH @ fps (smoother).
+        src.adaptOutputFormat(capW, capH, fps)
         surfaceHelper = SurfaceTextureHelper.create("rd-capture", egl.eglBaseContext)
         cap.initialize(surfaceHelper, applicationContext, src.capturerObserver)
         cap.startCapture(capW, capH, fps)
