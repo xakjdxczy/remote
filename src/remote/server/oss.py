@@ -17,6 +17,10 @@ import hmac
 import json
 import mimetypes
 import os
+import socket
+import ssl
+import subprocess
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -220,6 +224,29 @@ def presign_get(
     return f"{config.base_url}{uri}?{_canonical_query(query)}"
 
 
+def presign_put(
+    key: str,
+    *,
+    expires: int = 7200,
+    now: datetime | None = None,
+    cfg: OssConfig | None = None,
+) -> str:
+    """Time-limited PUT URL so a machine that can reach OSS can upload the APK."""
+    config = cfg or load_config()
+    if config is None:
+        raise OssError("OSS is not configured")
+    uri, query, _headers = _sign_v4(
+        method="PUT",
+        cfg=config,
+        key=key,
+        now=now or _utc_now(),
+        payload_hash="UNSIGNED-PAYLOAD",
+        expires=expires,
+        presign=True,
+    )
+    return f"{config.base_url}{uri}?{_canonical_query(query)}"
+
+
 def _request(
     method: str,
     key: str,
@@ -227,6 +254,8 @@ def _request(
     body: bytes = b"",
     content_type: str | None = None,
     meta: dict[str, str] | None = None,
+    extra_query: dict[str, str] | None = None,
+    timeout: int = 300,
     cfg: OssConfig,
 ) -> tuple[int, bytes, dict[str, str]]:
     payload_hash = hashlib.sha256(body).hexdigest()
@@ -236,23 +265,27 @@ def _request(
     if meta:
         for name, value in meta.items():
             headers[f"x-amz-meta-{name}"] = value
-    uri, _query, signed_headers = _sign_v4(
+    uri, query, signed_headers = _sign_v4(
         method=method,
         cfg=cfg,
         key=key,
         now=_utc_now(),
+        extra_query=extra_query,
         headers=headers,
         payload_hash=payload_hash,
         presign=False,
     )
+    url = f"{cfg.base_url}{uri}"
+    if query:
+        url = f"{url}?{_canonical_query(query)}"
     req = urllib.request.Request(
-        f"{cfg.base_url}{uri}",
+        url,
         data=body if method in {"PUT", "POST"} else None,
         method=method,
         headers=signed_headers,
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
             return resp.status, raw, {k.lower(): v for k, v in resp.headers.items()}
     except urllib.error.HTTPError as exc:
@@ -286,6 +319,10 @@ def get_object_text(key: str, *, cfg: OssConfig | None = None) -> str | None:
     return body.decode("utf-8")
 
 
+_MULTIPART_THRESHOLD = 8 * 1024 * 1024
+_MULTIPART_PART = 8 * 1024 * 1024
+
+
 def put_object(
     key: str,
     data: bytes,
@@ -297,7 +334,216 @@ def put_object(
     config = cfg or load_config()
     if config is None:
         raise OssError("OSS is not configured")
-    _request("PUT", key, body=data, content_type=content_type, meta=meta, cfg=config)
+    if len(data) >= _MULTIPART_THRESHOLD:
+        _put_via_socket(key, data, content_type=content_type, meta=meta, cfg=config)
+        return
+    _request("PUT", key, body=data, content_type=content_type, meta=meta, timeout=300, cfg=config)
+
+
+def _put_via_socket(
+    key: str,
+    data: bytes,
+    *,
+    content_type: str,
+    meta: dict[str, str] | None,
+    cfg: OssConfig,
+    send_chunk: int = 32 * 1024,
+    timeout: int = 900,
+) -> None:
+    """Single PUT over TLS. Sends the body in small chunks, then waits for 200."""
+    payload_hash = hashlib.sha256(data).hexdigest()
+    headers: dict[str, str] = {"content-type": content_type}
+    if meta:
+        for name, value in meta.items():
+            headers[f"x-amz-meta-{name}"] = value
+    uri, _query, signed_headers = _sign_v4(
+        method="PUT",
+        cfg=cfg,
+        key=key,
+        now=_utc_now(),
+        headers=headers,
+        payload_hash=payload_hash,
+        presign=False,
+    )
+    req_headers = {
+        "Host": cfg.host,
+        "Content-Length": str(len(data)),
+        "Connection": "close",
+    }
+    req_headers.update(signed_headers)
+    head = f"PUT {uri} HTTP/1.1\r\n" + "".join(f"{name}: {value}\r\n" for name, value in req_headers.items()) + "\r\n"
+    sock: ssl.SSLSocket | None = None
+    try:
+        raw = socket.create_connection((cfg.host, 443), timeout=30)
+        sock = ssl.create_default_context().wrap_socket(raw, server_hostname=cfg.host)
+        sock.settimeout(timeout)
+        sock.sendall(head.encode("ascii"))
+        sent = 0
+        while sent < len(data):
+            sock.sendall(data[sent : sent + send_chunk])
+            sent += send_chunk
+        resp = b""
+        while True:
+            block = sock.recv(4096)
+            if not block:
+                break
+            resp += block
+            if b"\r\n\r\n" in resp:
+                break
+    except OSError as exc:
+        raise OssError(f"OSS PUT {key} socket error after timeout={timeout}s: {type(exc).__name__}: {exc}") from exc
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+    if not resp:
+        raise OssError(f"OSS PUT {key} failed: empty response after sending {len(data)} bytes")
+    status_line = resp.split(b"\r\n", 1)[0].decode("iso-8859-1", errors="replace")
+    parts = status_line.split(" ", 2)
+    code = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else 0
+    if code != 200:
+        raise OssError(f"OSS PUT {key} failed: {status_line} ({len(data)} bytes)")
+
+
+def _put_file_via_curl(
+    key: str,
+    *,
+    path: Path | None = None,
+    data: bytes | None = None,
+    content_type: str,
+    meta: dict[str, str] | None,
+    cfg: OssConfig,
+) -> None:
+    """Upload large objects with curl so the TCP write is not bound by urllib timeouts."""
+    if path is None and data is None:
+        raise OssError("upload requires a file path or bytes")
+    if path is not None:
+        payload_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        upload_path = path
+        tmp = None
+    else:
+        assert data is not None
+        payload_hash = hashlib.sha256(data).hexdigest()
+        tmp = tempfile.NamedTemporaryFile(prefix="oss-put-", suffix=".bin")
+        tmp.write(data)
+        tmp.flush()
+        upload_path = Path(tmp.name)
+    headers: dict[str, str] = {"content-type": content_type}
+    if meta:
+        for name, value in meta.items():
+            headers[f"x-amz-meta-{name}"] = value
+    uri, _query, signed_headers = _sign_v4(
+        method="PUT",
+        cfg=cfg,
+        key=key,
+        now=_utc_now(),
+        headers=headers,
+        payload_hash=payload_hash,
+        presign=False,
+    )
+    cmd = [
+        "curl",
+        "-sS",
+        "-f",
+        "-X",
+        "PUT",
+        "--max-time",
+        "600",
+        "--connect-timeout",
+        "30",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+        "-T",
+        str(upload_path),
+        "-H",
+        "Expect:",
+        f"{cfg.base_url}{uri}",
+    ]
+    for name, value in signed_headers.items():
+        cmd += ["-H", f"{name}: {value}"]
+    try:
+        completed = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise OssError("curl is required to upload large APKs") from exc
+    finally:
+        if tmp is not None:
+            tmp.close()
+    if completed.returncode != 0 or not completed.stdout.endswith("200"):
+        detail = (completed.stderr or completed.stdout or "curl upload failed")[:400]
+        raise OssError(f"OSS PUT {key} failed: {detail}")
+
+
+def _xml_text(blob: bytes, tag: str) -> str:
+    start = blob.find(f"<{tag}>".encode())
+    end = blob.find(f"</{tag}>".encode())
+    if start < 0 or end < 0:
+        raise OssError(f"OSS response missing <{tag}>")
+    start += len(tag) + 2
+    return blob[start:end].decode("utf-8")
+
+
+def _put_multipart(
+    key: str,
+    data: bytes,
+    *,
+    content_type: str,
+    meta: dict[str, str] | None,
+    cfg: OssConfig,
+) -> None:
+    _status, body, _headers = _request(
+        "POST",
+        key,
+        content_type=content_type,
+        meta=meta,
+        extra_query={"uploads": ""},
+        timeout=60,
+        cfg=cfg,
+    )
+    upload_id = _xml_text(body, "UploadId")
+    parts: list[tuple[int, str]] = []
+    try:
+        for index, offset in enumerate(range(0, len(data), _MULTIPART_PART), start=1):
+            chunk = data[offset : offset + _MULTIPART_PART]
+            _part_status, _part_body, part_headers = _request(
+                "PUT",
+                key,
+                body=chunk,
+                extra_query={"partNumber": str(index), "uploadId": upload_id},
+                timeout=300,
+                cfg=cfg,
+            )
+            etag = (part_headers.get("etag") or "").strip()
+            if not etag:
+                raise OssError(f"OSS multipart part {index} missing ETag")
+            parts.append((index, etag))
+        complete = "<CompleteMultipartUpload>" + "".join(
+            f"<Part><PartNumber>{num}</PartNumber><ETag>{etag}</ETag></Part>" for num, etag in parts
+        ) + "</CompleteMultipartUpload>"
+        _request(
+            "POST",
+            key,
+            body=complete.encode("utf-8"),
+            content_type="application/xml",
+            extra_query={"uploadId": upload_id},
+            timeout=120,
+            cfg=cfg,
+        )
+    except Exception:
+        try:
+            _request(
+                "DELETE",
+                key,
+                extra_query={"uploadId": upload_id},
+                timeout=60,
+                cfg=cfg,
+            )
+        except OssError:
+            pass
+        raise
 
 
 def upload_apk(
@@ -332,22 +578,69 @@ def upload_apk(
         meta=meta,
         cfg=config,
     )
-    info = {
-        "key": config.apk_key,
+    info = _apk_info(config.apk_key, len(data), digest, uploaded_at, version, version_code)
+    write_apk_manifest(info, cfg=config)
+    return info
+
+
+def _apk_info(
+    key: str,
+    size: int,
+    digest: str,
+    uploaded_at: str,
+    version: str,
+    version_code: str,
+) -> dict[str, Any]:
+    return {
+        "key": key,
         "filename": DOWNLOAD_FILENAME,
-        "size": len(data),
+        "size": size,
         "sha256": digest,
         "uploaded_at": uploaded_at,
         "version": version or None,
         "version_code": int(version_code) if str(version_code).isdigit() else None,
     }
+
+
+def write_apk_manifest(info: dict[str, Any], *, cfg: OssConfig | None = None) -> None:
+    config = cfg or load_config()
+    if config is None:
+        raise OssError("OSS is not configured")
     put_object(
         config.meta_key,
         json.dumps(info, ensure_ascii=False, indent=2).encode("utf-8"),
         content_type="application/json; charset=utf-8",
         cfg=config,
     )
-    return info
+
+
+def apk_put_instructions(
+    path: str | Path,
+    *,
+    version: str = "",
+    version_code: str = "",
+    expires: int = 7200,
+    cfg: OssConfig | None = None,
+) -> dict[str, Any]:
+    """Describe a local-machine PUT: APK stays here, caller uploads via presigned URL."""
+    config = cfg or load_config()
+    if config is None:
+        raise OssError("OSS is not configured")
+    apk_path = Path(path)
+    if not apk_path.is_file():
+        raise OssError(f"APK not found: {apk_path}")
+    data = apk_path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    uploaded_at = _utc_now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    info = _apk_info(config.apk_key, len(data), digest, uploaded_at, version, version_code)
+    write_apk_manifest(info, cfg=config)
+    url = presign_put(config.apk_key, expires=expires, cfg=config)
+    return {
+        **info,
+        "put_url": url,
+        "expires_in": expires,
+        "curl": f'curl -f -T "{DOWNLOAD_FILENAME}" "{url}"',
+    }
 
 
 def apk_download_payload(*, expires: int = DEFAULT_EXPIRES, cfg: OssConfig | None = None) -> dict[str, Any]:

@@ -104,9 +104,13 @@ export OSS_ENDPOINT="s3.example-region.example-oss.com"
 export OSS_BUCKET="<bucket>"
 # 可选：OSS_REGION / OSS_APK_KEY / OSS_META_KEY
 
-# 上传编译产物
+# 上传编译产物（需本机能直连 OSS；云端构建机若被墙可改用 --presign-put）
 python -m remote upload-apk android/app/build/outputs/apk/debug/app-debug.apk \
   --version 1.8.1 --version-code 15
+
+# 只签发限时 PUT 链接，拿到能访问 OSS 的电脑上再用 curl -T 上传
+python -m remote upload-apk android/app/build/outputs/apk/debug/app-debug.apk \
+  --version 1.8.1 --version-code 15 --presign-put
 
 # 信令进程需带上同样的 OSS_* 环境变量
 python -m remote server
