@@ -39,4 +39,10 @@ object DeviceStore {
     fun setAskedBattery(ctx: Context) {
         prefs(ctx).edit().putBoolean("asked_battery", true).apply()
     }
+
+    fun camHost(ctx: Context): String = prefs(ctx).getString("cam_host", "") ?: ""
+
+    fun setCamHost(ctx: Context, host: String) {
+        prefs(ctx).edit().putString("cam_host", host).apply()
+    }
 }

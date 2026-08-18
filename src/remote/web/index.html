@@ -18,6 +18,7 @@
       </div>
       <nav>
         <button class="nav-item active" data-view="home">远程控制</button>
+        <button class="nav-item" data-view="cam" hidden>手机摄像头</button>
         <button class="nav-item" data-view="files">远程文件</button>
         <button class="nav-item" data-view="chat">消息</button>
         <button class="nav-item" data-view="settings">设置</button>
@@ -106,6 +107,46 @@
         </div>
       </section>
 
+      <section id="view-cam" class="view hidden">
+        <header class="topbar">
+          <h1>手机摄像头</h1>
+          <div id="cam-status" class="pill">未连接</div>
+        </header>
+        <div class="home-grid">
+          <article class="card">
+            <div class="card-kicker">本机连接 · Wi‑Fi 或 USB 二选一</div>
+            <div class="pass-tools">
+              <button id="cam-mode-wifi" class="ghost" type="button">Wi‑Fi 局域网</button>
+              <button id="cam-mode-usb" class="ghost" type="button">USB</button>
+              <button id="cam-rotate" class="ghost" type="button">刷新配对码</button>
+              <button id="cam-wait" class="ghost" type="button">重新等待手机</button>
+            </div>
+            <div class="id-label" style="margin-top:16px">配对码（手机上填写）</div>
+            <div id="cam-token" class="device-id">------</div>
+            <div id="cam-wifi-help">
+              <div class="id-label">电脑局域网 IP</div>
+              <p id="cam-ips" class="hint"></p>
+              <img id="cam-qr" class="cam-qr" alt="配对二维码" hidden />
+              <p id="cam-pair-url" class="hint"></p>
+              <p class="hint">手机扫码，或打开尘埃X →「作为摄像头」，填 IP 和配对码。同一 Wi‑Fi 或一方开热点即可。</p>
+            </div>
+            <div id="cam-usb-help" hidden>
+              <p id="cam-usb-hint" class="hint"></p>
+              <code id="cam-usb-cmd"></code>
+              <button id="cam-adb" class="ghost" type="button" style="margin-top:10px;width:auto">准备 USB（adb reverse）</button>
+              <p id="cam-adb-status" class="hint"></p>
+              <p class="hint">USB 网络共享：手机填电脑在共享网段的 IP。adb reverse 成功后手机填 127.0.0.1。</p>
+            </div>
+          </article>
+          <article class="card">
+            <div class="card-kicker">预览（会议软件请再开虚拟设备）</div>
+            <video id="cam-video" class="cam-video" autoplay playsinline controls></video>
+            <button id="cam-sink" class="primary" type="button">输出到系统摄像头 / 麦克风</button>
+            <p id="cam-sink-status" class="hint">会议软件要选设备时点上面按钮。需已安装 OBS 虚拟摄像头（或 pyvirtualcam）以及 BlackHole / VB-CABLE。打开的是尘埃X 桌面窗口，不用再另开命令行。</p>
+          </article>
+        </div>
+      </section>
+
       <section id="view-files" class="view hidden">
         <header class="topbar"><h1>远程文件</h1></header>
         <article class="card">
@@ -155,6 +196,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="/static/js/app.js?v=kf1"></script>
+  <script type="module" src="/static/js/app.js?v=cam1"></script>
 </body>
 </html>

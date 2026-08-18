@@ -31,6 +31,7 @@
 - 会话内文字消息、实时网速/流量、延迟拆解（网络·缓冲·解码）/ FPS 显示
 - 无显示器时自动使用可交互的**演示桌面**
 - **跨平台被控端**：Windows / macOS / Linux 真机截屏 + 键鼠注入，Android 经 ADB 桥或**原生 App**远程控制
+- **手机当摄像头**：同一套尘埃X。电脑打开**桌面程序**（双击 `尘埃X.app` / `尘埃X.exe`），窗口里选「手机摄像头」；手机 App 选「作为摄像头」。Wi‑Fi 局域网或 USB 二选一。会议软件要点窗口里的「输出到系统摄像头 / 麦克风」（需 OBS 虚拟摄像头或 BlackHole / VB-CABLE）。
 
 ## 跨平台被控端（backend）
 
@@ -129,6 +130,23 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+### 电脑桌面程序（Mac / Windows）
+
+用户双击 **尘埃X.app**（macOS）或 **尘埃X.exe**（Windows）即可，不需要安装或运行 Python。窗口里是远程控制 + 手机摄像头 / 虚拟设备。官网上的网页控制台只支持远程控制。
+
+开发机打一次包（源码不会进用户电脑）：
+
+```bash
+pip install -e ".[pack,host]"
+python -m remote pack
+```
+
+生成 `desktop/mac/尘埃X.app` 或 `desktop/windows/尘埃X/尘埃X.exe`。首次若被拦：右键 → 打开。
+
+Windows 包在 GitHub Actions 的 `windows-latest` 上打：Actions → Pack desktop → 下载 `DustX-windows` 产物。也可在仓库页手动 Run workflow。
+
+源码调试仍可用 `python -m remote app`。
+
 ### 一键演示
 
 ```bash
@@ -153,6 +171,8 @@ python -m remote host --server ws://服务器IP:8080/ws
 
 | 命令 | 作用 |
 | --- | --- |
+| `python -m remote pack` | 打出 尘埃X.app / 尘埃X.exe（用户不跑 Python） |
+| `python -m remote app` | 源码调试：打开桌面窗口 |
 | `python -m remote server` | 信令 + 网页 UI |
 | `python -m remote host` | 被控端，打印识别码/密码（backend=auto） |
 | `python -m remote host --backend desktop` | 强制真机截屏（Win/macOS/Linux） |

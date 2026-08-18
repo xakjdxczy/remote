@@ -6,22 +6,32 @@ import asyncio
 import logging
 import os
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from remote.ids import constant_time_equals, format_device_id, normalize_device_id
 from remote.p2p import SIGNAL_KINDS, ice_servers_payload
 from remote.protocol import decode_json, encode_json
-from remote.server import oss
+from remote.server import camlink, oss
 from remote.server.registry import Registry
 
 logger = logging.getLogger("remotedesk.server")
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+
+def web_dir() -> Path:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and meipass:
+        return Path(meipass) / "remote" / "web"
+    return Path(__file__).resolve().parent.parent / "web"
+
+
+WEB_DIR = web_dir()
 
 registry = Registry()
 demo_host: dict[str, str] | None = None
@@ -51,6 +61,17 @@ def _net_bytes() -> int | None:
 
 
 NET_START = _net_bytes() or 0
+
+
+def desktop_features_enabled() -> bool:
+    """Phone-as-camera and virtual devices exist only in the desktop window."""
+    return os.environ.get("DUSTX_DESKTOP", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _require_desktop() -> None:
+    if not desktop_features_enabled():
+        raise HTTPException(status_code=404, detail="手机摄像头仅在尘埃X桌面程序中可用")
+
 
 _RELAY_LOG = os.environ.get("COTURN_LOG", "/var/log/turnserver/turn.log")
 _relay_state = {"offset": 0, "total": 0}
@@ -113,6 +134,7 @@ def create_app() -> FastAPI:
             "transport": "p2p",
             "ice_servers": ice_servers_payload(),
             "demo_host": None,
+            "desktop_app": desktop_features_enabled(),
         }
         if demo_host:
             payload["demo_host"] = {
@@ -140,6 +162,77 @@ def create_app() -> FastAPI:
         if redirect:
             return RedirectResponse(payload["url"], status_code=302)
         return payload
+
+    @app.get("/api/cam")
+    async def cam_info(request: Request) -> dict[str, Any]:
+        _require_desktop()
+        port = request.url.port or (443 if request.url.scheme == "https" else 80)
+        payload = camlink.hub.info(port=port)
+        payload["ice_servers"] = ice_servers_payload()
+        return payload
+
+    @app.post("/api/cam/rotate")
+    async def cam_rotate() -> dict[str, Any]:
+        _require_desktop()
+        token = camlink.hub.rotate_token()
+        return {"ok": True, "token": token}
+
+    @app.post("/api/cam/adb")
+    async def cam_adb(request: Request) -> dict[str, Any]:
+        _require_desktop()
+        port = request.url.port or (443 if request.url.scheme == "https" else 80)
+        return await camlink.adb_reverse(port)
+
+    @app.post("/api/cam/sink/start")
+    async def cam_sink_start(request: Request) -> dict[str, Any]:
+        _require_desktop()
+        port = request.url.port or (443 if request.url.scheme == "https" else 80)
+        from remote.cam_sink import start_background
+
+        return start_background(f"ws://127.0.0.1:{port}/cam/ws", camlink.hub.token)
+
+    @app.post("/api/cam/sink/stop")
+    async def cam_sink_stop() -> dict[str, Any]:
+        _require_desktop()
+        from remote.cam_sink import stop_background
+
+        return stop_background()
+
+    @app.websocket("/cam/ws")
+    async def cam_ws(ws: WebSocket) -> None:
+        if not desktop_features_enabled():
+            raise HTTPException(status_code=404, detail="手机摄像头仅在尘埃X桌面程序中可用")
+        await ws.accept()
+        attached = False
+        try:
+            while True:
+                raw = await ws.receive_text()
+                try:
+                    msg = decode_json(raw)
+                except ValueError:
+                    await ws.send_text(encode_json({"type": "error", "message": "invalid json"}))
+                    continue
+                kind = msg.get("type")
+                if kind == "hello":
+                    role = msg.get("role")
+                    token = str(msg.get("token") or "")
+                    if role not in {"desktop", "phone"}:
+                        await ws.send_json({"type": "error", "message": "role 必须是 desktop 或 phone"})
+                        continue
+                    attached = await camlink.hub.attach(ws, role, token)
+                    if not attached:
+                        break
+                elif kind == "signal":
+                    await camlink.hub.relay(ws, msg)
+                else:
+                    await ws.send_json({"type": "error", "message": "unknown type"})
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.exception("cam websocket error")
+        finally:
+            if attached:
+                await camlink.hub.detach(ws)
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket) -> None:

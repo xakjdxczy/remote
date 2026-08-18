@@ -1,3 +1,5 @@
+import { bindCamUi } from "./cam.js";
+
 const $ = (id) => document.getElementById(id);
 
 const state = {
@@ -308,6 +310,11 @@ async function loadConfig() {
     $("remote-id").value = cfg.demo_host.device_id_display;
     $("remote-pass").value = cfg.demo_host.password;
     $("local-hint").textContent = `演示主机 ${cfg.demo_host.device_id_display} 已在线。本机远程码见上方，连接演示主机需对方同意。`;
+  }
+  if (cfg.desktop_app) {
+    const camNav = document.querySelector('.nav-item[data-view="cam"]');
+    if (camNav) camNav.hidden = false;
+    bindCamUi();
   }
   const savedRefresh = localStorage.getItem(PW_REFRESH_KEY);
   if (savedRefresh && $("pw-refresh")) $("pw-refresh").value = savedRefresh;

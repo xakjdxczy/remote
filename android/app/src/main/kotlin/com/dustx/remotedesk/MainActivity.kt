@@ -84,6 +84,9 @@ class MainActivity : AppCompatActivity() {
         refreshSpinner.setSelection(values.indexOf(DeviceStore.refreshSec(this)).coerceAtLeast(0))
 
         findViewById<Button>(R.id.btn_start).setOnClickListener { startProjection() }
+        findViewById<Button>(R.id.btn_camera).setOnClickListener {
+            startActivity(Intent(this, CameraLinkActivity::class.java))
+        }
         findViewById<Button>(R.id.btn_stop).setOnClickListener {
             stopService(Intent(this, ScreenCaptureService::class.java))
         }

@@ -23,6 +23,17 @@ host = [
     "mss>=9.0",
     "pynput>=1.7",
 ]
+desktop = [
+    "pywebview>=5.0",
+    "pyvirtualcam>=0.11",
+    "sounddevice>=0.5",
+]
+pack = [
+    "pyinstaller>=6.0",
+    "pywebview>=5.0",
+    "pyvirtualcam>=0.11",
+    "sounddevice>=0.5",
+]
 dev = [
     "pytest>=8",
     "httpx>=0.27",

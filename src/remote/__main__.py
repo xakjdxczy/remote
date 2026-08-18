@@ -49,10 +49,24 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_upload.add_argument("--expires", type=int, default=7200, help="presigned PUT lifetime in seconds")
 
+    p_app = sub.add_parser("app", help="open the DustX desktop window (macOS / Windows)")
+    p_app.add_argument("--host", default="0.0.0.0")
+    p_app.add_argument("--port", type=int, default=8080)
+
+    p_cam = sub.add_parser("cam-sink", help="(dev) feed phone camera/mic into virtual devices")
+    p_cam.add_argument("--url", default="ws://127.0.0.1:8080/cam/ws")
+    p_cam.add_argument("--token", required=True)
+
+    sub.add_parser("pack", help="build 尘埃X.app / 尘埃X.exe (user does not run Python)")
+
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-    if args.cmd == "server":
+    if args.cmd == "app":
+        from remote.desktop_app import run_app
+
+        run_app(args.host, args.port)
+    elif args.cmd == "server":
         _run_server(args.host, args.port)
     elif args.cmd == "host":
         from remote.host.agent import main as host_main
@@ -74,6 +88,14 @@ def main(argv: list[str] | None = None) -> None:
         _run_demo(args.host, args.port, args.fps)
     elif args.cmd == "upload-apk":
         _upload_apk(args.apk, args.version, args.version_code, args.presign_put, args.expires)
+    elif args.cmd == "cam-sink":
+        from remote.cam_sink import main as cam_sink_main
+
+        cam_sink_main(["--url", args.url, "--token", args.token])
+    elif args.cmd == "pack":
+        from remote.pack import main as pack_main
+
+        pack_main()
 
 
 def _run_server(host: str, port: int) -> None:

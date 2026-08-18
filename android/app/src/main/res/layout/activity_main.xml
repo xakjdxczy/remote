@@ -13,7 +13,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="尘埃X · 远程被控"
+            android:text="尘埃X"
             android:textColor="#EAF0FF"
             android:textSize="24sp"
             android:textStyle="bold" />
@@ -63,6 +63,15 @@
             android:backgroundTint="#5B8CFF"
             android:text="开始被控（授权录屏）"
             android:textColor="#FFFFFF" />
+
+        <Button
+            android:id="@+id/btn_camera"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="#22E6C8"
+            android:text="作为摄像头（连旁边的电脑）"
+            android:textColor="#0B1022" />
 
         <Button
             android:id="@+id/btn_stop"

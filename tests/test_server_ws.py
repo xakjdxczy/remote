@@ -1,9 +1,15 @@
 from fastapi.testclient import TestClient
 
-from remote.server.api import create_app
+from remote.server.api import WEB_DIR, create_app, web_dir
 from remote.server.oss import OssError
 from remote.server.registry import Registry
 import remote.server.api as server_mod
+
+
+def test_web_dir_points_at_package_assets():
+    assert WEB_DIR == web_dir()
+    assert (WEB_DIR / "index.html").is_file()
+    assert (WEB_DIR / "js" / "cam.js").is_file()
 
 
 def test_health_and_config(monkeypatch):
@@ -17,6 +23,7 @@ def test_health_and_config(monkeypatch):
     assert cfg.json()["mode"] == "server"
     assert cfg.json()["transport"] == "p2p"
     assert cfg.json()["demo_host"] is None
+    assert cfg.json()["desktop_app"] is False
     for server in cfg.json()["ice_servers"]:
         for url in server["urls"]:
             assert url.startswith("stun:")

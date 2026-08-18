@@ -31,6 +31,11 @@ htmlcov/
 .vscode/
 .DS_Store
 
+# Frozen desktop apps (built artifacts)
+desktop/mac/*.app/
+desktop/windows/尘埃X/
+desktop/windows/*.exe
+
 # RemoteDesk
 .remotedesk/
 *.jpeg

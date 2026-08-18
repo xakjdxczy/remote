@@ -43,7 +43,7 @@ python -m remote upload-apk app/build/outputs/apk/debug/app-debug.apk \
 - 版本在 `app/build.gradle.kts` 的 `versionName`(展示,如 `1.1.0`)与 `versionCode`(整数,每次发布 +1)。
 - App 首页会显示 `版本 v<versionName> (<versionCode>)`,方便确认装的是哪一版。
 - **约定:每次发布 APK 前都递增 `versionCode`(+1)并更新 `versionName`。**
-- 当前:`1.8.1 (15)`。
+- 当前:`1.9.0 (16)`。首页「作为摄像头」可把本机相机/麦克风送给旁边电脑（Wi‑Fi 或 USB 二选一）。
 
 ## 说明
 
