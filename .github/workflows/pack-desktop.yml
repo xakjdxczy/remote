@@ -23,26 +23,32 @@ jobs:
       - name: Install pack extras
         shell: bash
         run: |
+          set -euo pipefail
           python -m pip install -U pip
-          python -m pip install -e ".[pack,host]"
+          python -m pip install -e .
+          python -m pip install "pyinstaller>=6.0" "pywebview>=5.0" "mss>=9.0" "pynput>=1.7" "sounddevice>=0.5"
+          if ! python -m pip install "pyvirtualcam>=0.11"; then
+            echo "pyvirtualcam is optional; continuing without it" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
-      - name: Build 尘埃X.exe
+      - name: Build DustX.exe
+        shell: bash
         run: python -m remote pack
 
       - name: Stage artifact
-        shell: pwsh
+        shell: bash
         run: |
-          $src = "desktop/windows/尘埃X"
-          if (-not (Test-Path -LiteralPath $src)) {
-            throw "pack finished but desktop/windows/尘埃X is missing"
-          }
-          $exe = Join-Path $src "尘埃X.exe"
-          if (-not (Test-Path -LiteralPath $exe)) {
-            throw "尘埃X.exe is missing"
-          }
-          New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item -LiteralPath $src -Destination "artifact/DustX" -Recurse
-          Get-ChildItem -LiteralPath "artifact/DustX" | Select-Object -First 20 Name, Length
+          set -euo pipefail
+          src="desktop/windows/尘埃X"
+          if [[ ! -d "$src" ]]; then
+            echo "missing $src" >&2
+            ls -la desktop/windows || true
+            ls -la dist || true
+            exit 1
+          fi
+          mkdir -p artifact
+          cp -R "$src" artifact/DustX
+          ls -la artifact/DustX | head
 
       - uses: actions/upload-artifact@v4
         with:
@@ -50,3 +56,20 @@ jobs:
           path: artifact/DustX
           if-no-files-found: error
           retention-days: 14
+
+      - name: Record failure
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "## Pack failed"
+            echo
+            echo "Python: $(python -V 2>&1)"
+            echo
+            echo '```'
+            python -m pip list || true
+            echo
+            ls -la dist || true
+            ls -la desktop/windows || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
