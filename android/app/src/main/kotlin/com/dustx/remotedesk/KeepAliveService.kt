@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -27,6 +28,7 @@ class KeepAliveService : Service(), SignalingClient.Callbacks {
     private var worker: HandlerThread? = null
     private var handler: Handler? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
     private var backoffMs = 1_000L
     private var networkCb: ConnectivityManager.NetworkCallback? = null
 
@@ -40,6 +42,7 @@ class KeepAliveService : Service(), SignalingClient.Callbacks {
         instance = this
         startForegroundInternal()
         acquireWakeLock()
+        acquireWifiLock()
         ensureWorker()
         connectNow()
         startPingLoop()
@@ -120,6 +123,25 @@ class KeepAliveService : Service(), SignalingClient.Callbacks {
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "dustx:signal").also {
             it.setReferenceCounted(false)
             it.acquire()
+        }
+    }
+
+    private fun acquireWifiLock() {
+        if (wifiLock?.isHeld == true) return
+        try {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                @Suppress("DEPRECATION")
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            wifiLock = wm.createWifiLock(mode, "dustx:wifi").also {
+                it.setReferenceCounted(false)
+                it.acquire()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "wifi lock: ${e.message}")
         }
     }
 
@@ -256,6 +278,7 @@ class KeepAliveService : Service(), SignalingClient.Callbacks {
             "wrong password" -> "密码错误"
             "device offline" -> "设备不在线"
             "device busy" -> "设备正忙"
+            "replaced" -> "对方已重新发起连接"
             "cannot connect to self" -> "不能连接自己"
             else -> "会话结束：$reason"
         }
@@ -289,6 +312,7 @@ class KeepAliveService : Service(), SignalingClient.Callbacks {
         }
         networkCb = null
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
+        try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (_: Exception) {}
         if (instance === this) instance = null
         super.onDestroy()
     }

@@ -296,12 +296,12 @@ async def _on_connect(ws: WebSocket, msg: dict[str, Any]) -> None:
     if caller and caller.device_id == host.device_id:
         await ws.send_text(encode_json({"type": "auth_failed", "message": "cannot connect to self"}))
         return
-    if host.session_id or registry.session_for_ws(ws):
-        await ws.send_text(encode_json({"type": "auth_failed", "message": "device busy"}))
-        return
     if not password or not constant_time_equals(password, host.temp_password):
         await ws.send_text(encode_json({"type": "auth_failed", "message": "wrong password"}))
         return
+    # A dropped P2P session often leaves the host marked busy (viewer closed
+    # locally without hangup, or the phone froze). A new connect replaces it.
+    await _replace_stale_sessions(host, ws)
     try:
         session = registry.create_session(
             host, ws, viewer_name, viewer_id=caller.device_id if caller else None
@@ -365,19 +365,32 @@ async def _on_auth_result(ws: WebSocket, msg: dict[str, Any]) -> None:
         await _end_and_notify(session.session_id, "rejected")
 
 
+async def _replace_stale_sessions(host: Any, viewer_ws: Any) -> None:
+    ids: list[str] = []
+    if host.session_id:
+        ids.append(host.session_id)
+    extra = registry.session_for_ws(viewer_ws)
+    if extra and extra.session_id not in ids:
+        ids.append(extra.session_id)
+    for session_id in ids:
+        await _end_and_notify(session_id, "replaced", skip_ws=viewer_ws)
+
+
 async def _on_hangup(ws: WebSocket, msg: dict[str, Any]) -> None:
     session = registry.session_for_ws(ws)
     if session:
         await _end_and_notify(session.session_id, str(msg.get("reason") or "hangup"))
 
 
-async def _end_and_notify(session_id: str, reason: str) -> None:
+async def _end_and_notify(session_id: str, reason: str, skip_ws: Any = None) -> None:
     _cancel_call_timer(session_id)
     session = registry.end_session(session_id)
     if not session:
         return
     payload = encode_json({"type": "session_end", "session_id": session_id, "reason": reason})
     for peer in (session.host_ws, session.viewer_ws):
+        if skip_ws is not None and peer is skip_ws:
+            continue
         try:
             await peer.send_text(payload)
         except Exception:

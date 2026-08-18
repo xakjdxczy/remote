@@ -114,3 +114,85 @@ def test_host_can_reject_incoming_call(monkeypatch):
         ended = viewer.receive_json()
         assert ended["type"] == "session_end"
         assert ended["reason"] == "rejected"
+
+
+def test_reconnect_replaces_busy_session(monkeypatch):
+    """A dropped P2P session used to leave the host busy forever."""
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    client = TestClient(create_app())
+    with client.websocket_connect("/ws") as host, client.websocket_connect("/ws") as viewer:
+        host.send_json({
+            "type": "register",
+            "hostname": "phone",
+            "os": "Android",
+            "device_id": "555666777",
+            "temp_password": "passw0rd",
+        })
+        assert host.receive_json()["type"] == "registered"
+        viewer.send_json({
+            "type": "connect",
+            "device_id": "555666777",
+            "password": "passw0rd",
+            "name": "web",
+        })
+        assert viewer.receive_json()["type"] == "call_pending"
+        incoming = host.receive_json()
+        host.send_json({"type": "auth_result", "session_id": incoming["session_id"], "ok": True})
+        assert host.receive_json()["type"] == "session_start"
+        assert viewer.receive_json()["type"] == "session_start"
+
+        # Viewer drops P2P locally and dials again without hangup.
+        viewer.send_json({
+            "type": "connect",
+            "device_id": "555666777",
+            "password": "passw0rd",
+            "name": "web",
+        })
+        pending = viewer.receive_json()
+        assert pending["type"] == "call_pending"
+        replaced = host.receive_json()
+        assert replaced["type"] == "session_end"
+        assert replaced["reason"] == "replaced"
+        incoming2 = host.receive_json()
+        assert incoming2["type"] == "incoming_call"
+        host.send_json({"type": "auth_result", "session_id": incoming2["session_id"], "ok": True})
+        assert host.receive_json()["type"] == "session_start"
+        assert viewer.receive_json()["type"] == "session_start"
+
+
+def test_reconnect_from_second_viewer_replaces_ghost(monkeypatch):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    client = TestClient(create_app())
+    with client.websocket_connect("/ws") as host, \
+            client.websocket_connect("/ws") as old_viewer, \
+            client.websocket_connect("/ws") as new_viewer:
+        host.send_json({
+            "type": "register",
+            "hostname": "phone",
+            "os": "Android",
+            "device_id": "888999000",
+            "temp_password": "passw0rd",
+        })
+        assert host.receive_json()["type"] == "registered"
+        old_viewer.send_json({
+            "type": "connect",
+            "device_id": "888999000",
+            "password": "passw0rd",
+            "name": "old",
+        })
+        assert old_viewer.receive_json()["type"] == "call_pending"
+        incoming = host.receive_json()
+        host.send_json({"type": "auth_result", "session_id": incoming["session_id"], "ok": True})
+        assert host.receive_json()["type"] == "session_start"
+        assert old_viewer.receive_json()["type"] == "session_start"
+
+        new_viewer.send_json({
+            "type": "connect",
+            "device_id": "888999000",
+            "password": "passw0rd",
+            "name": "new",
+        })
+        assert new_viewer.receive_json()["type"] == "call_pending"
+        assert host.receive_json()["type"] == "session_end"
+        assert old_viewer.receive_json()["type"] == "session_end"
+        assert host.receive_json()["type"] == "incoming_call"

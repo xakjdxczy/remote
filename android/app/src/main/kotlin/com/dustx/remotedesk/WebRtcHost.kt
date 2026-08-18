@@ -180,7 +180,14 @@ class WebRtcHost(
         }
         override fun onIceConnectionReceivingChange(b: Boolean) {}
         override fun onConnectionChange(s: PeerConnection.PeerConnectionState?) {
-            if (s == PeerConnection.PeerConnectionState.CONNECTED) HostState.set(status = "P2P 已连接")
+            when (s) {
+                PeerConnection.PeerConnectionState.CONNECTED -> HostState.set(status = "P2P 已连接")
+                PeerConnection.PeerConnectionState.FAILED -> {
+                    HostState.set(status = "P2P 断开")
+                    try { signaling.hangup("p2p_failed") } catch (_: Exception) {}
+                }
+                else -> {}
+            }
         }
         override fun onAddStream(s: MediaStream?) {}
         override fun onRemoveStream(s: MediaStream?) {}
@@ -191,12 +198,20 @@ class WebRtcHost(
     private val dcObserver = object : DataChannel.Observer {
         override fun onBufferedAmountChange(previousAmount: Long) {}
         override fun onStateChange() {
-            if (dc?.state() == DataChannel.State.OPEN) {
-                HostState.set(status = "被控中")
-                sendJson(
-                    JSONObject().put("type", "screen_info")
-                        .put("width", reportedW).put("height", reportedH).put("backend", "android")
-                )
+            when (dc?.state()) {
+                DataChannel.State.OPEN -> {
+                    HostState.set(status = "被控中")
+                    sendJson(
+                        JSONObject().put("type", "screen_info")
+                            .put("width", reportedW).put("height", reportedH).put("backend", "android")
+                    )
+                }
+                DataChannel.State.CLOSED -> {
+                    if (answerSent) {
+                        try { signaling.hangup("p2p_closed") } catch (_: Exception) {}
+                    }
+                }
+                else -> {}
             }
         }
         override fun onMessage(buffer: DataChannel.Buffer) {

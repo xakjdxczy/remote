@@ -441,9 +441,11 @@ function onMessage(ev) {
       ? "对方拒绝了连接"
       : msg.reason === "timeout"
         ? "对方未在时限内同意"
-        : (msg.reason || "已断开");
+        : msg.reason === "replaced"
+          ? "已有新的连接请求"
+          : (msg.reason || "已断开");
     hideIncoming();
-    endSession(reason);
+    endSession(reason, { notify: false });
   } else if (msg.type === "signal") {
     handleSignal(msg);
   } else if (msg.type === "error") {
@@ -587,7 +589,6 @@ async function startP2P(session) {
   pc.addEventListener("iceconnectionstatechange", () => {
     if (pc.iceConnectionState === "failed") {
       sendSignal({ type: "signal", kind: "failed", message: "ice failed" });
-      sendSignal({ type: "hangup", reason: "p2p_failed" });
       endSession("P2P 直连失败（没有中继回退）");
     }
   });
@@ -656,8 +657,11 @@ function closeP2P() {
   }
 }
 
-function endSession(reason) {
+function endSession(reason, { notify = true } = {}) {
   const wasSession = state.session;
+  if (wasSession && notify) {
+    sendSignal({ type: "hangup", reason: "viewer_end" });
+  }
   state.session = false;
   state.role = null;
   $("nav-bar")?.classList.add("hidden");
@@ -875,7 +879,6 @@ async function connect() {
 }
 
 function hangup() {
-  sendSignal({ type: "hangup", reason: "viewer_hangup" });
   endSession("已主动断开");
 }
 

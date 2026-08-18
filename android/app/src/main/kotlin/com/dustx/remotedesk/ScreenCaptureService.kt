@@ -100,7 +100,15 @@ class ScreenCaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent == null) { stopSelf(); return START_NOT_STICKY }
+        if (intent == null) {
+            if (capturer != null) {
+                startForegroundInternal()
+                return START_STICKY
+            }
+            hangupCapture("capture_restart")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startForegroundInternal()
 
         val data = intent.getParcelableExtra<Intent>(EXTRA_DATA)
@@ -162,7 +170,10 @@ class ScreenCaptureService : Service() {
         val factory = WebRtcHost.ensureFactory(applicationContext)
         val egl = WebRtcHost.egl()
         val cap = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
-            override fun onStop() { stopSelf() }
+            override fun onStop() {
+                hangupCapture("projection_stopped")
+                stopSelf()
+            }
         })
         capturer = cap
         val src = factory.createVideoSource(true) // isScreencast
@@ -308,8 +319,13 @@ class ScreenCaptureService : Service() {
         try { surfaceHelper?.dispose() } catch (_: Exception) {}
         if (instance === this) instance = null
         HostState.hostPeer = null
+        hangupCapture("capture_stopped")
         HostState.set(status = "在线，等待连接")
         super.onDestroy()
+    }
+
+    private fun hangupCapture(reason: String) {
+        try { HostState.signaling?.hangup(reason) } catch (_: Exception) {}
     }
 
     companion object {
