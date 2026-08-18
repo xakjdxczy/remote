@@ -10,13 +10,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from remote.ids import constant_time_equals, format_device_id, normalize_device_id
 from remote.p2p import SIGNAL_KINDS, ice_servers_payload
 from remote.protocol import decode_json, encode_json
+from remote.server import oss
 from remote.server.registry import Registry
 
 logger = logging.getLogger("remotedesk.server")
@@ -119,6 +120,25 @@ def create_app() -> FastAPI:
                 "device_id_display": format_device_id(demo_host["device_id"]),
                 "password": demo_host["password"],
             }
+        return payload
+
+    @app.get("/api/downloads/android")
+    async def android_download(redirect: int = 0) -> Any:
+        """Issue a short-lived OSS download URL for the Android APK.
+
+        Official-site JS fetches this as JSON, then the browser downloads from
+        OSS. ``?redirect=1`` 302s for no-JS / direct links.
+        """
+        try:
+            payload = await asyncio.to_thread(oss.apk_download_payload)
+        except oss.OssError as exc:
+            message = str(exc)
+            status = 503 if "not configured" in message else 404
+            if redirect:
+                raise HTTPException(status_code=status, detail=message) from exc
+            return JSONResponse({"ok": False, "message": message}, status_code=status)
+        if redirect:
+            return RedirectResponse(payload["url"], status_code=302)
         return payload
 
     @app.websocket("/ws")

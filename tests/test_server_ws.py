@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from remote.server.api import create_app
+from remote.server.oss import OssError
 from remote.server.registry import Registry
 import remote.server.api as server_mod
 
@@ -87,6 +88,46 @@ def test_register_connect_and_signal_only(monkeypatch):
         answer = viewer.receive_json()
         assert answer["type"] == "signal"
         assert answer["kind"] == "answer"
+
+
+def test_android_download_json_and_redirect(monkeypatch):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+
+    def fake_payload():
+        return {
+            "ok": True,
+            "url": "https://bucket.example/app.apk?sig=1",
+            "filename": "remotedesk-android.apk",
+            "expires_in": 600,
+            "size": 12,
+            "version": "1.8.1",
+            "version_code": 15,
+            "sha256": "abc",
+            "uploaded_at": "2026-08-18T00:00:00Z",
+        }
+
+    monkeypatch.setattr(server_mod.oss, "apk_download_payload", fake_payload)
+    client = TestClient(create_app())
+    data = client.get("/api/downloads/android")
+    assert data.status_code == 200
+    assert data.json()["url"].startswith("https://bucket.example/")
+    assert data.json()["filename"] == "remotedesk-android.apk"
+    bounced = client.get("/api/downloads/android?redirect=1", follow_redirects=False)
+    assert bounced.status_code == 302
+    assert bounced.headers["location"] == "https://bucket.example/app.apk?sig=1"
+
+
+def test_android_download_unavailable(monkeypatch):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    monkeypatch.setattr(
+        server_mod.oss,
+        "apk_download_payload",
+        lambda: (_ for _ in ()).throw(OssError("OSS is not configured")),
+    )
+    client = TestClient(create_app())
+    res = client.get("/api/downloads/android")
+    assert res.status_code == 503
+    assert res.json()["ok"] is False
 
 
 def test_host_can_reject_incoming_call(monkeypatch):

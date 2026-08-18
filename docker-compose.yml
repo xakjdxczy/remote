@@ -4,3 +4,10 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    environment:
+      OSS_AK: ${OSS_AK:-}
+      OSS_SK: ${OSS_SK:-}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_REGION: ${OSS_REGION:-}
+      OSS_APK_KEY: ${OSS_APK_KEY:-}

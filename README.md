@@ -93,6 +93,34 @@ export TURN_PASS="<secret>"
 python -m remote server
 ```
 
+### 官网安卓包（OSS）
+
+编译好的 APK 放到对象存储后，官网下载按钮会先请求信令服务器 `/api/downloads/android`，由服务器签发短时下载链接，再跳转到 OSS 下载（不把 AK/SK 暴露给浏览器）。
+
+```bash
+export OSS_AK="<access-key>"
+export OSS_SK="<secret-key>"
+export OSS_ENDPOINT="s3.example-region.example-oss.com"
+export OSS_BUCKET="<bucket>"
+# 可选：OSS_REGION / OSS_APK_KEY / OSS_META_KEY
+
+# 上传编译产物（需本机能直连 OSS；云端构建机若被墙可改用 --presign-put）
+python -m remote upload-apk android/app/build/outputs/apk/debug/app-debug.apk \
+  --version 1.8.1 --version-code 15
+
+# 只签发限时 PUT 链接，拿到能访问 OSS 的电脑上再用 curl -T 上传
+python -m remote upload-apk android/app/build/outputs/apk/debug/app-debug.apk \
+  --version 1.8.1 --version-code 15 --presign-put
+
+# 信令进程需带上同样的 OSS_* 环境变量
+python -m remote server
+```
+
+官网静态页与信令同域时，Nginx 把 `/api/` 反代到信令即可。接口：
+
+- `GET /api/downloads/android` → JSON（`url` / `filename` / `version`）
+- `GET /api/downloads/android?redirect=1` → 302 到签名 URL
+
 ## 快速开始
 
 ```bash
@@ -130,6 +158,7 @@ python -m remote host --server ws://服务器IP:8080/ws
 | `python -m remote host --backend desktop` | 强制真机截屏（Win/macOS/Linux） |
 | `python -m remote host --backend android` | 经 ADB 控制安卓设备 |
 | `python -m remote demo` | 本地同时拉起信令和演示主机 |
+| `python -m remote upload-apk <apk>` | 把安卓包上传到 OSS，供官网下载 |
 
 ## 测试
 

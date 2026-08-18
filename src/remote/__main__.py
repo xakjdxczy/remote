@@ -38,6 +38,17 @@ def main(argv: list[str] | None = None) -> None:
     p_demo.add_argument("--port", type=int, default=8080)
     p_demo.add_argument("--fps", type=int, default=30)
 
+    p_upload = sub.add_parser("upload-apk", help="upload the Android APK to OSS")
+    p_upload.add_argument("apk", help="path to the compiled .apk")
+    p_upload.add_argument("--version", default="", help="versionName shown to downloaders")
+    p_upload.add_argument("--version-code", default="", dest="version_code", help="integer versionCode")
+    p_upload.add_argument(
+        "--presign-put",
+        action="store_true",
+        help="print a time-limited PUT URL for uploading from another machine",
+    )
+    p_upload.add_argument("--expires", type=int, default=7200, help="presigned PUT lifetime in seconds")
+
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -61,6 +72,8 @@ def main(argv: list[str] | None = None) -> None:
         host_main(host_argv)
     elif args.cmd == "demo":
         _run_demo(args.host, args.port, args.fps)
+    elif args.cmd == "upload-apk":
+        _upload_apk(args.apk, args.version, args.version_code, args.presign_put, args.expires)
 
 
 def _run_server(host: str, port: int) -> None:
@@ -94,6 +107,27 @@ def _run_demo(host: str, port: int, fps: int) -> None:
     threading.Thread(target=host_thread, name="host-agent", daemon=True).start()
     print(f"RemoteDesk 演示模式: 打开 http://127.0.0.1:{port} 即可远程控制本机演示桌面", flush=True)
     uvicorn.run(server_app.app, host=host, port=port, log_level="info")
+
+
+def _upload_apk(apk: str, version: str, version_code: str, presign_put: bool, expires: int) -> None:
+    if presign_put:
+        from remote.server.oss import apk_put_instructions
+
+        info = apk_put_instructions(apk, version=version, version_code=version_code, expires=expires)
+        print(f"对象 {info['key']}  ({info['size']} bytes, sha256={info['sha256'][:12]}…)", flush=True)
+        print(f"请在能访问 OSS 的电脑上执行（{info['expires_in']} 秒内有效）：", flush=True)
+        print(info["curl"], flush=True)
+        return
+
+    from remote.server.oss import upload_apk
+
+    info = upload_apk(apk, version=version, version_code=version_code)
+    print(
+        f"已上传 {info['filename']}  ({info['size']} bytes, sha256={info['sha256'][:12]}…)",
+        flush=True,
+    )
+    if info.get("version"):
+        print(f"版本 {info['version']} ({info.get('version_code') or '-'})", flush=True)
 
 
 if __name__ == "__main__":
