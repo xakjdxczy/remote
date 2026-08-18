@@ -25,6 +25,10 @@ cd android
 echo "sdk.dir=/path/to/android-sdk" > local.properties
 gradle :app:assembleDebug        # 或 ./gradlew（先 gradle wrapper 生成 wrapper）
 # 产物：app/build/outputs/apk/debug/app-debug.apk
+
+# 上传到 OSS 后，官网通过 /api/downloads/android 取签名链接下载
+python -m remote upload-apk app/build/outputs/apk/debug/app-debug.apk \
+  --version 1.8.1 --version-code 15
 ```
 
 ## 权限说明

@@ -80,3 +80,42 @@
   resize();
   tick();
 })();
+
+// Official-site APK download: ask the signaling server for a short-lived OSS URL.
+(function () {
+  const link = document.getElementById("android-download");
+  if (!link) return;
+
+  link.addEventListener("click", async (event) => {
+    event.preventDefault();
+    if (link.dataset.busy === "1") return;
+    const original = link.textContent;
+    link.dataset.busy = "1";
+    link.classList.add("is-busy");
+    link.textContent = "正在获取下载链接…";
+    try {
+      const res = await fetch("/api/downloads/android", {
+        headers: { Accept: "application/json" },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.url) {
+        throw new Error(data.message || "获取下载链接失败");
+      }
+      const a = document.createElement("a");
+      a.href = data.url;
+      a.rel = "noopener";
+      a.download = data.filename || "remotedesk-android.apk";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      link.textContent = original;
+      window.alert(err instanceof Error ? err.message : "下载失败，请稍后重试");
+      return;
+    } finally {
+      link.dataset.busy = "0";
+      link.classList.remove("is-busy");
+      link.textContent = original;
+    }
+  });
+})();
