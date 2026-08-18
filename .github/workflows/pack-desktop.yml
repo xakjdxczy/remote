@@ -9,6 +9,10 @@ on:
       - "src/remote/**"
       - "pyproject.toml"
 
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -35,7 +39,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m remote pack 2>&1 | tee pack.log
+          python -X utf8 -m remote pack 2>&1 | tee pack.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pack-log
+          path: pack.log
+          if-no-files-found: ignore
 
       - name: Stage artifact
         shell: bash

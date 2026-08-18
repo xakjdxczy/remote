@@ -24,7 +24,7 @@ def main() -> None:
         raise SystemExit(f"找不到打包配置：{spec}")
 
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(spec)]
-    print("正在打包尘埃X 桌面程序（用户双击即可，无需安装 Python）…", flush=True)
+    print("Packing DustX desktop app (user double-clicks; no Python install)...", flush=True)
     subprocess.check_call(cmd, cwd=root)
 
     if sys.platform == "darwin":
@@ -54,5 +54,5 @@ def main() -> None:
     else:
         shutil.copy2(built, dest)
 
-    print(f"已生成：{dest}", flush=True)
-    print("双击即可打开，不需要运行 python。", flush=True)
+    print(f"Built: {dest}", flush=True)
+    print("Double-click to open. Python is not required.", flush=True)

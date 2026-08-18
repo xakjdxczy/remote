@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec: double-clickable 尘埃X.app / 尘埃X.exe."""
+"""PyInstaller spec for the DustX desktop app."""
 
 import sys
 from pathlib import Path
@@ -46,8 +46,10 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-# Windows PyInstaller often breaks on non-ASCII exe names.
-APP_NAME = "尘埃X" if sys.platform == "darwin" else "DustX"
+# Non-ASCII names break PyInstaller on Windows.
+APP_NAME = "DustX"
+if sys.platform == "darwin":
+    APP_NAME = "\u5c18\u57c3X"
 
 exe = EXE(
     pyz,
@@ -75,14 +77,14 @@ coll = COLLECT(
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
-        name="尘埃X.app",
+        name="\u5c18\u57c3X.app",
         icon=None,
         bundle_identifier="com.dustx.remotedesk",
         info_plist={
-            "CFBundleName": "尘埃X",
-            "CFBundleDisplayName": "尘埃X",
+            "CFBundleName": "\u5c18\u57c3X",
+            "CFBundleDisplayName": "\u5c18\u57c3X",
             "NSHighResolutionCapable": True,
-            "NSCameraUsageDescription": "预览手机作为本机摄像头时的画面",
-            "NSMicrophoneUsageDescription": "使用手机麦克风作为本机输入",
+            "NSCameraUsageDescription": "Preview the phone camera on this computer",
+            "NSMicrophoneUsageDescription": "Use the phone microphone on this computer",
         },
     )
