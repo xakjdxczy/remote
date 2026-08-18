@@ -38,13 +38,18 @@ class WebRtcHost(
     private val reportedH: Int,
     private val deviceW: Int,
     private val deviceH: Int,
+    private val onNeedKeyframe: (() -> Unit)? = null,
 ) {
+    val currentBitrateBps: Int get() = currentMaxBps
     private var pc: PeerConnection? = null
     private var dc: DataChannel? = null
     private var answerSent = false
     private var pressX = 0
     private var pressY = 0
     private val main = Handler(Looper.getMainLooper())
+    private var currentMaxBps = P2P_MAX_BPS
+    private var paramTries = 0
+    private var relayPath = false
 
     val isOpen: Boolean get() = dc?.state() == DataChannel.State.OPEN
 
@@ -72,24 +77,13 @@ class WebRtcHost(
             override fun onSetSuccess() {
                 if (videoTrack != null) {
                     try {
-                        val sender = peer.addTrack(videoTrack, listOf("rd-stream"))
-                        // Latency-first: keep framerate but cap the bitrate hard so
-                        // even complex/animated screens stay under a mobile uplink.
-                        // Telemetry showed interactive bursts at 2.5Mbps overwhelmed
-                        // the uplink -> hundreds of lost packets -> keyframe
-                        // death-spiral. A 1.5Mbps ceiling + low floor lets congestion
-                        // control back off fast and keeps the stream alive.
-                        val p = sender.parameters
-                        p.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
-                        if (p.encodings.isNotEmpty()) {
-                            p.encodings[0].maxFramerate = 30
-                            p.encodings[0].minBitrateBps = 300_000
-                            p.encodings[0].maxBitrateBps = 1_500_000
-                        }
-                        sender.parameters = p
+                        peer.addTrack(videoTrack, listOf("rd-stream"))
                     } catch (e: Exception) {
-                        Log.w(TAG, "addTrack/params: ${e.message}")
+                        Log.w(TAG, "addTrack: ${e.message}")
                     }
+                    // encodings is often empty right after addTrack; retry until it sticks.
+                    // Start conservative (TURN is common). conn_info raises the cap on P2P.
+                    applySenderParams(TURN_MAX_BPS)
                     // Prefer hardware H.264 (usually smoother/cheaper than SW VP8).
                     try {
                         val caps = peerFactory().getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO)
@@ -103,7 +97,11 @@ class WebRtcHost(
                 }
                 peer.createAnswer(object : SimpleSdp() {
                     override fun onCreateSuccess(desc: SessionDescription) {
-                        peer.setLocalDescription(SimpleSdp(), desc)
+                        peer.setLocalDescription(object : SimpleSdp() {
+                            override fun onSetSuccess() {
+                                applySenderParams(currentMaxBps)
+                            }
+                        }, desc)
                         main.postDelayed({ trySendAnswer() }, 2500)
                     }
                 }, MediaConstraints())
@@ -129,10 +127,40 @@ class WebRtcHost(
         channel.send(DataChannel.Buffer(ByteBuffer.wrap(data), false))
     }
 
+    fun notifySceneChange() {
+        sendJson(JSONObject().put("type", "scene_change"))
+    }
+
     fun close() {
         try { dc?.close() } catch (_: Exception) {}
         try { pc?.close() } catch (_: Exception) {}
         dc = null; pc = null; answerSent = false
+        paramTries = 0
+        relayPath = false
+        currentMaxBps = P2P_MAX_BPS
+    }
+
+    /** Apply max bitrate. encodings[] is empty until SDP is ready — retry a few times. */
+    private fun applySenderParams(maxBps: Int) {
+        currentMaxBps = maxBps
+        val sender = pc?.senders?.firstOrNull { it.track()?.kind() == "video" } ?: return
+        try {
+            val p = sender.parameters
+            if (p.encodings.isEmpty()) {
+                if (paramTries++ < 10) main.postDelayed({ applySenderParams(currentMaxBps) }, 400)
+                else Log.w(TAG, "sender encodings still empty; bitrate cap not applied")
+                return
+            }
+            paramTries = 0
+            p.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
+            p.encodings[0].maxFramerate = 30
+            p.encodings[0].minBitrateBps = (maxBps * 0.2).toInt().coerceAtLeast(150_000)
+            p.encodings[0].maxBitrateBps = maxBps
+            sender.parameters = p
+            Log.i(TAG, "sender bitrate cap=${maxBps}bps encodings=${p.encodings.size}")
+        } catch (e: Exception) {
+            Log.w(TAG, "sender params: ${e.message}")
+        }
     }
 
     // ---- observers -------------------------------------------------------
@@ -181,8 +209,28 @@ class WebRtcHost(
                 "nav" -> InputAccessibilityService.global(msg.optString("action"))
                 "ping" -> sendJson(JSONObject().put("type", "pong").put("t", msg.opt("t")))
                 "conn_info" -> {
-                    HostState.connMethod = if (msg.optString("method") == "relay") "TURN 中继" else "P2P 直连"
+                    relayPath = msg.optString("method") == "relay"
+                    HostState.connMethod = if (relayPath) "TURN 中继" else "P2P 直连"
+                    val proto = msg.optString("protocol").uppercase()
+                    if (proto.isNotEmpty()) HostState.setMedia(proto = proto)
+                    main.post { applySenderParams(if (relayPath) TURN_MAX_BPS else P2P_MAX_BPS) }
                     HostState.set()
+                }
+                "qos" -> {
+                    val buf = msg.optInt("buffer_ms")
+                    val action = msg.optString("action")
+                    Log.i(TAG, "qos buffer=${buf}ms action=$action")
+                    main.post {
+                        if (action == "keyframe" || buf >= 180) {
+                            applySenderParams(if (relayPath) TURN_STRESS_BPS else P2P_STRESS_BPS)
+                            notifySceneChange()
+                            try { onNeedKeyframe?.invoke() } catch (e: Exception) {
+                                Log.w(TAG, "keyframe: ${e.message}")
+                            }
+                        } else if (action == "backoff" || buf >= 120) {
+                            applySenderParams(if (relayPath) TURN_STRESS_BPS else P2P_STRESS_BPS)
+                        }
+                    }
                 }
             }
         }
@@ -218,6 +266,11 @@ class WebRtcHost(
 
     companion object {
         private const val TAG = "RD.WebRTC"
+        // Match remote.latency.video_bitrate_kbps (kbps → bps).
+        const val P2P_MAX_BPS = 2_000_000
+        const val TURN_MAX_BPS = 1_000_000
+        const val P2P_STRESS_BPS = 1_500_000
+        const val TURN_STRESS_BPS = 800_000
         @Volatile private var factory: PeerConnectionFactory? = null
         @Volatile private var eglBase: EglBase? = null
 

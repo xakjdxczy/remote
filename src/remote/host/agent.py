@@ -98,12 +98,14 @@ class HostAgent:
         backend: str = "auto",
         adb_serial: str | None = None,
         on_registered=None,
+        auto_accept: bool = False,
     ) -> None:
         self.server = server
         self.fps = max(2, min(fps, 30))
         self.quality = quality
         self.prefer_virtual = prefer_virtual
         self.on_registered = on_registered
+        self.auto_accept = auto_accept
         self.source = open_frame_source(
             prefer_virtual=prefer_virtual, backend=backend, adb_serial=adb_serial
         )
@@ -117,6 +119,7 @@ class HostAgent:
         self._peer: HostPeer | None = None
         self._traffic_total = load_traffic_total()
         self._rtt: int | None = None
+        self._relay_path = False
 
     async def run_forever(self) -> None:
         while not self._stop.is_set():
@@ -212,6 +215,21 @@ class HostAgent:
             for stat in report.values():
                 if getattr(stat, "type", None) in ("outbound-rtp", "data-channel"):
                     total += getattr(stat, "bytesSent", 0) or 0
+            encode = None
+            proto = None
+            path = None
+            for stat in report.values():
+                kind = getattr(stat, "type", None)
+                mime = str(getattr(stat, "mimeType", "") or "")
+                if kind == "codec" and mime.lower().startswith("video/"):
+                    encode = mime.split("/")[-1].upper()
+                if kind == "candidate-pair" and (
+                    getattr(stat, "nominated", False) or getattr(stat, "selected", False)
+                ):
+                    proto = str(getattr(stat, "protocol", "") or getattr(stat, "networkType", "") or "").upper()
+                    ctype = str(getattr(stat, "localCandidateType", "") or "")
+                    if "relay" in ctype:
+                        path = "TURN"
             now = time.time()
             if last_bytes and total >= last_bytes:
                 delta = total - last_bytes
@@ -220,8 +238,15 @@ class HostAgent:
                 save_traffic_total(self._traffic_total)
                 speed = delta / dt if dt > 0 else 0
                 rtt = f"{self._rtt} ms" if self._rtt is not None else "-- ms"
+                extra = ""
+                if encode:
+                    extra += f" · 编码 {encode}"
+                if proto:
+                    extra += f" · {proto}"
+                if path:
+                    extra += f" · {path}"
                 print(
-                    f"  [流量] 上行 {_fmt_speed(speed)} · 本次 {_fmt_bytes(total)} · 历史 {_fmt_bytes(self._traffic_total)} · 延迟 {rtt}",
+                    f"  [流量] 上行 {_fmt_speed(speed)} · 本次 {_fmt_bytes(total)} · 历史 {_fmt_bytes(self._traffic_total)} · 延迟 {rtt}{extra}",
                     flush=True,
                 )
             last_bytes = total
@@ -234,7 +259,11 @@ class HostAgent:
                 continue
             msg = decode_json(raw)
             kind = msg.get("type")
-            if kind == "session_start":
+            if kind == "incoming_call":
+                await self._on_incoming(ws, msg)
+            elif kind == "session_start":
+                peer = msg.get("viewer_id_display") or msg.get("viewer_id") or msg.get("viewer_name")
+                print(f"  [会话] 对方远程码 {peer}", flush=True)
                 await self._start_peer(ws, msg)
             elif kind == "session_end":
                 await self._stop_peer(str(msg.get("reason") or ""))
@@ -247,10 +276,36 @@ class HostAgent:
                     save_device_config({"device_id": self.device_id, "temp_password": self.password})
                     print_banner(self.device_id, self.password, self.server, self.source.backend_name())
 
+    async def _on_incoming(self, ws, msg: dict) -> None:
+        peer = msg.get("viewer_id_display") or msg.get("viewer_id") or msg.get("viewer_name") or "?"
+        print(f"  [来电] 对方远程码 {peer}（{msg.get('viewer_name') or 'viewer'}）", flush=True)
+        ok = self.auto_accept
+        if not ok:
+            if sys.stdin.isatty():
+                try:
+                    line = await asyncio.wait_for(
+                        asyncio.to_thread(input, "  同意这次远程协助？[y/N] "),
+                        timeout=45,
+                    )
+                    ok = line.strip().lower() in {"y", "yes", "是"}
+                except asyncio.TimeoutError:
+                    print("  [来电] 超时未同意", flush=True)
+                    ok = False
+            else:
+                ok = True
+                print("  [来电] 无交互终端，已自动同意", flush=True)
+        await self._send(
+            ws,
+            encode_json({"type": "auth_result", "session_id": msg.get("session_id"), "ok": ok}),
+        )
+        if not ok:
+            print("  [来电] 已拒绝", flush=True)
+
     async def _start_peer(self, ws, msg: dict) -> None:
         if self._peer:
             await self._peer.close()
         self.session_id = msg.get("session_id")
+        self._relay_path = False
         logger.info("session started by %s (P2P only)", msg.get("viewer_name"))
 
         async def send_signal(payload: dict) -> None:
@@ -308,9 +363,22 @@ class HostAgent:
             print(f"  [导航] {msg.get('action')}", flush=True)
             logger.info("nav action: %s", msg.get("action"))
         elif kind == "conn_info":
-            method = "TURN 中继（经服务器转发）" if msg.get("method") == "relay" else "P2P 直连"
+            relay = msg.get("method") == "relay"
+            self._relay_path = relay
+            method = "TURN 中继（经服务器转发）" if relay else "P2P 直连"
             print(f"  [连接方式] {method}", flush=True)
             logger.info("connection method: %s", msg.get("method"))
+            if self._peer:
+                asyncio.create_task(self._peer.apply_bitrate(relay=relay))
+        elif kind == "qos":
+            buf = msg.get("buffer_ms")
+            action = msg.get("action")
+            print(f"  [QoS] 缓冲 {buf} ms · {action}", flush=True)
+            logger.info("qos buffer=%s action=%s", buf, action)
+            if self._peer:
+                if action == "keyframe":
+                    self._peer.force_scene_burst()
+                asyncio.create_task(self._peer.apply_bitrate(relay=self._relay_path, stressed=True))
         elif kind == "chat":
             print(f"  [聊天] {msg.get('from', 'viewer')}: {msg.get('text')}", flush=True)
         elif kind == "ping":
@@ -351,6 +419,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--adb-serial", default=None, help="target Android device serial for --backend android")
     parser.add_argument("--virtual", action="store_true", help="alias for --backend virtual")
+    parser.add_argument(
+        "--auto-accept",
+        action="store_true",
+        help="skip the incoming-call prompt (demo / unattended hosts)",
+    )
     return parser
 
 
@@ -365,6 +438,7 @@ def main(argv: list[str] | None = None) -> None:
         prefer_virtual=args.virtual,
         backend=backend,
         adb_serial=args.adb_serial,
+        auto_accept=args.auto_accept,
     )
     try:
         asyncio.run(agent.run_forever())

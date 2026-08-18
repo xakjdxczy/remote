@@ -52,11 +52,18 @@ def test_register_connect_and_signal_only(monkeypatch):
             "password": "passw0rd",
             "name": "alice",
         })
-        start_viewer = viewer.receive_json()
+        pending = viewer.receive_json()
+        incoming = host.receive_json()
+        assert pending["type"] == "call_pending"
+        assert incoming["type"] == "incoming_call"
+        assert incoming["viewer_name"] == "alice"
+        host.send_json({"type": "auth_result", "session_id": incoming["session_id"], "ok": True})
         start_host = host.receive_json()
+        start_viewer = viewer.receive_json()
         assert start_viewer["type"] == "session_start"
         assert start_host["type"] == "session_start"
         assert start_viewer["transport"] == "p2p"
+        assert start_viewer["host_id"] == "123123123"
 
         host.send_bytes(b"\x01" + b"frame")
         viewer.send_json({"type": "input", "event": "move", "x": 10, "y": 20})
@@ -80,3 +87,30 @@ def test_register_connect_and_signal_only(monkeypatch):
         answer = viewer.receive_json()
         assert answer["type"] == "signal"
         assert answer["kind"] == "answer"
+
+
+def test_host_can_reject_incoming_call(monkeypatch):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    client = TestClient(create_app())
+    with client.websocket_connect("/ws") as host, client.websocket_connect("/ws") as viewer:
+        host.send_json({
+            "type": "register",
+            "hostname": "demo",
+            "os": "Linux",
+            "device_id": "321321321",
+            "temp_password": "passw0rd",
+        })
+        assert host.receive_json()["type"] == "registered"
+        viewer.send_json({
+            "type": "connect",
+            "device_id": "321321321",
+            "password": "passw0rd",
+            "name": "bob",
+        })
+        assert viewer.receive_json()["type"] == "call_pending"
+        incoming = host.receive_json()
+        assert incoming["type"] == "incoming_call"
+        host.send_json({"type": "auth_result", "session_id": incoming["session_id"], "ok": False})
+        ended = viewer.receive_json()
+        assert ended["type"] == "session_end"
+        assert ended["reason"] == "rejected"

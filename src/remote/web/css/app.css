@@ -77,7 +77,28 @@ code { background: #eef3f9; padding: 1px 6px; border-radius: 4px; }
 .device-id { font-size: 40px; letter-spacing: 2px; font-weight: 700; margin: 6px 0 18px; }
 .password { font-size: 28px; font-weight: 600; letter-spacing: 1px; }
 .pass-row { display: flex; justify-content: space-between; align-items: end; gap: 16px; }
+.pass-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+.pass-tools .ghost { width: auto; }
+.inline-label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; margin: 0; }
+.inline-label select {
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: #fff;
+}
 .hint { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.modal {
+  position: fixed; inset: 0; background: rgba(15, 27, 45, 0.45);
+  display: flex; align-items: center; justify-content: center; z-index: 20;
+}
+.modal-card {
+  background: #fff; border-radius: 16px; padding: 28px; width: min(420px, 92vw);
+  box-shadow: var(--shadow);
+}
+.modal-card h2 { margin: 0 0 8px; }
+.incoming-id { font-size: 28px; font-weight: 700; letter-spacing: 1px; margin: 8px 0 12px; }
+.modal-actions { display: flex; gap: 10px; }
+.modal-actions .primary { margin-top: 0; }
+.hosting-banner {
+  color: #22e6c8; font-size: 15px; padding: 24px; text-align: center;
+}
 
 label { display: block; margin: 12px 0 6px; color: var(--muted); font-size: 13px; }
 input {

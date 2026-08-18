@@ -31,6 +31,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_host.add_argument("--adb-serial", default=None, help="target Android device serial for --backend android")
     p_host.add_argument("--virtual", action="store_true", help="alias for --backend virtual")
+    p_host.add_argument("--auto-accept", action="store_true", help="skip incoming-call prompt")
 
     p_demo = sub.add_parser("demo", help="start signaling + a local demo host together")
     p_demo.add_argument("--host", default="0.0.0.0")
@@ -55,6 +56,8 @@ def main(argv: list[str] | None = None) -> None:
             host_argv += ["--adb-serial", args.adb_serial]
         if args.virtual:
             host_argv.append("--virtual")
+        if getattr(args, "auto_accept", False):
+            host_argv.append("--auto-accept")
         host_main(host_argv)
     elif args.cmd == "demo":
         _run_demo(args.host, args.port, args.fps)
@@ -81,6 +84,7 @@ def _run_demo(host: str, port: int, fps: int) -> None:
         fps=fps,
         prefer_virtual=True,
         on_registered=on_registered,
+        auto_accept=True,
     )
 
     def host_thread() -> None:
