@@ -33,15 +33,23 @@ jobs:
 
       - name: Build DustX.exe
         shell: bash
-        run: python -m remote pack
+        run: |
+          set -euo pipefail
+          python -m remote pack 2>&1 | tee pack.log
 
       - name: Stage artifact
         shell: bash
         run: |
           set -euo pipefail
-          src="desktop/windows/尘埃X"
-          if [[ ! -d "$src" ]]; then
-            echo "missing $src" >&2
+          src=""
+          for cand in desktop/windows/DustX desktop/windows/尘埃X; do
+            if [[ -d "$cand" ]]; then
+              src="$cand"
+              break
+            fi
+          done
+          if [[ -z "$src" ]]; then
+            echo "missing packed Windows folder" >&2
             ls -la desktop/windows || true
             ls -la dist || true
             exit 1
@@ -67,6 +75,8 @@ jobs:
             echo "Python: $(python -V 2>&1)"
             echo
             echo '```'
+            tail -n 120 pack.log || true
+            echo
             python -m pip list || true
             echo
             ls -la dist || true

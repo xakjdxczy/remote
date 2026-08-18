@@ -46,12 +46,15 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+# Windows PyInstaller often breaks on non-ASCII exe names.
+APP_NAME = "尘埃X" if sys.platform == "darwin" else "DustX"
+
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name="尘埃X",
+    name=APP_NAME,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -66,7 +69,7 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="尘埃X",
+    name=APP_NAME,
 )
 
 if sys.platform == "darwin":

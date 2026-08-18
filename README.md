@@ -141,7 +141,7 @@ pip install -e ".[pack,host]"
 python -m remote pack
 ```
 
-生成 `desktop/mac/尘埃X.app` 或 `desktop/windows/尘埃X/尘埃X.exe`。首次若被拦：右键 → 打开。
+生成 `desktop/mac/尘埃X.app` 或 `desktop/windows/DustX/DustX.exe`。首次若被拦：右键 → 打开。
 
 Windows 包在 GitHub Actions 的 `windows-latest` 上打：Actions → Pack desktop → 下载 `DustX-windows` 产物。也可在仓库页手动 Run workflow。
 

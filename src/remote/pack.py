@@ -31,11 +31,14 @@ def main() -> None:
         built = root / "dist" / "尘埃X.app"
         dest = root / "desktop" / "mac" / "尘埃X.app"
     else:
-        built = root / "dist" / "尘埃X"
-        dest = root / "desktop" / "windows" / "尘埃X"
-        if not built.is_dir():
-            built = root / "dist" / "尘埃X.exe"
-            dest = root / "desktop" / "windows" / "尘埃X.exe"
+        built = root / "dist" / "DustX"
+        dest = root / "desktop" / "windows" / "DustX"
+        if not built.exists():
+            built = root / "dist" / "尘埃X"
+            dest = root / "desktop" / "windows" / "尘埃X"
+        if not built.exists():
+            built = root / "dist" / "DustX.exe"
+            dest = root / "desktop" / "windows" / "DustX.exe"
 
     if not built.exists():
         raise SystemExit("打包结束但没有找到输出文件")

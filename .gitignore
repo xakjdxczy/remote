@@ -34,6 +34,7 @@ htmlcov/
 # Frozen desktop apps (built artifacts)
 desktop/mac/*.app/
 desktop/windows/尘埃X/
+desktop/windows/DustX/
 desktop/windows/*.exe
 
 # RemoteDesk
