@@ -7,7 +7,8 @@ Credentials come from the environment and never appear in API responses:
 * ``OSS_BUCKET`` — bucket name
 * ``OSS_REGION`` — optional; inferred from the endpoint when omitted
 * ``OSS_APK_KEY`` — object key for the Android package (default
-  ``downloads/remotedesk-android.apk``)
+  ``downloads/remotedesk-android.bin``; download filename stays ``.apk``.
+  JD Cloud blocks ``.apk`` on the default OSS domain.)
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_APK_KEY = "downloads/remotedesk-android.apk"
+DEFAULT_APK_KEY = "downloads/remotedesk-android.bin"
 DEFAULT_META_KEY = "downloads/remotedesk-android.json"
 DEFAULT_EXPIRES = 600
 DOWNLOAD_FILENAME = "remotedesk-android.apk"
@@ -648,6 +649,19 @@ def apk_download_payload(*, expires: int = DEFAULT_EXPIRES, cfg: OssConfig | Non
     if config is None:
         raise OssError("OSS is not configured")
     headers = head_object(config.apk_key, cfg=config)
+    if headers is None and config.apk_key.endswith(".bin"):
+        # Older uploads used a .apk key; JD Cloud forbids that on the default domain.
+        headers = head_object("downloads/remotedesk-android.apk", cfg=config)
+        if headers is not None:
+            config = OssConfig(
+                access_key=config.access_key,
+                secret_key=config.secret_key,
+                endpoint=config.endpoint,
+                bucket=config.bucket,
+                region=config.region,
+                apk_key="downloads/remotedesk-android.apk",
+                meta_key=config.meta_key,
+            )
     if headers is None:
         raise OssError("android package is not uploaded")
     meta: dict[str, Any] = {}
