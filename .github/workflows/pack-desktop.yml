@@ -40,8 +40,10 @@ jobs:
       - name: Configure and build
         shell: bash
         run: |
-          cmake -B desktop/cpp/build -S desktop/cpp -G "Visual Studio 17 2022" -A x64
-          cmake --build desktop/cpp/build --config Release -j
+          set -euo pipefail
+          cmake --version
+          cmake -B desktop/cpp/build -S desktop/cpp
+          cmake --build desktop/cpp/build --config Release --parallel
 
       - name: Stage exe
         shell: bash

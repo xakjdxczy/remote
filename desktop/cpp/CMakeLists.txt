@@ -147,9 +147,16 @@ elseif(WIN32)
   add_dependencies(DustX DustXCam DustXMic)
   set_target_properties(DustX PROPERTIES OUTPUT_NAME "DustX")
   include(FetchContent)
+  if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+  endif()
+  if(POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)
+  endif()
   FetchContent_Declare(
     webview2
     URL https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.2849.39
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   )
   FetchContent_GetProperties(webview2)
   if(NOT webview2_POPULATED)
@@ -169,6 +176,7 @@ elseif(WIN32)
   FetchContent_Declare(
     wintun
     URL https://www.wintun.net/builds/wintun-0.14.1.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   )
   FetchContent_GetProperties(wintun)
   if(NOT wintun_POPULATED)
