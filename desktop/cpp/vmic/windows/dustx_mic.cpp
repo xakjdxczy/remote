@@ -24,7 +24,7 @@
 DEFINE_GUID(CLSID_DustXMic, 0xa71c3e80, 0x6d42, 0x4f1b, 0x9e, 0x3a, 0xc4, 0xd8, 0xb2, 0xe9, 0x1f, 0x81);
 
 static const WCHAR kFilterName[] = L"尘埃X 麦克风";
-static std::atomic<long> g_locks{0};
+static volatile LONG g_locks = 0;
 static const GUID kAmpin = {0x9b00f101, 0x1567, 0x11d1, {0xb3, 0xf1, 0x00, 0xaa, 0x00, 0x37, 0x61, 0xc5}};
 
 constexpr int kRate = 48000;
@@ -47,7 +47,7 @@ class ComBase : public T {
 
  protected:
   virtual ~ComBase() = default;
-  long refs_;
+  volatile LONG refs_;
 };
 
 class Pin : public IPin, public IAMStreamConfig, public IKsPropertySet {
@@ -488,7 +488,7 @@ HRESULT Filter::QueryInterface(REFIID riid, void** pp) {
     *pp = nullptr;
     return E_NOINTERFACE;
   }
-  AddRef();
+  ComBase<IBaseFilter>::AddRef();
   return S_OK;
 }
 

@@ -25,7 +25,7 @@
 DEFINE_GUID(CLSID_DustXCam, 0xa71c3e80, 0x6d42, 0x4f1b, 0x9e, 0x3a, 0xc4, 0xd8, 0xb2, 0xe9, 0x1f, 0x70);
 
 static const WCHAR kFilterName[] = L"尘埃X 摄像头";
-static std::atomic<long> g_locks{0};
+static volatile LONG g_locks = 0;
 
 static const GUID kAmpin = {0x9b00f101, 0x1567, 0x11d1, {0xb3, 0xf1, 0x00, 0xaa, 0x00, 0x37, 0x61, 0xc5}};
 
@@ -45,7 +45,7 @@ class ComBase : public T {
 
  protected:
   virtual ~ComBase() = default;
-  long refs_;
+  volatile LONG refs_;
 };
 
 class DustXPin : public IPin, public IAMStreamConfig, public IKsPropertySet {
@@ -387,7 +387,7 @@ HRESULT DustXPin::ConnectionMediaType(AM_MEDIA_TYPE* mt) {
 HRESULT DustXPin::QueryPinInfo(PIN_INFO* info) {
   ZeroMemory(info, sizeof(*info));
   info->pFilter = filter_;
-  filter_->AddRef();
+  static_cast<IBaseFilter*>(filter_)->AddRef();
   info->dir = PINDIR_OUTPUT;
   wcscpy_s(info->achName, L"Output");
   return S_OK;
@@ -566,7 +566,7 @@ HRESULT DustXFilter::QueryInterface(REFIID riid, void** pp) {
     *pp = nullptr;
     return E_NOINTERFACE;
   }
-  AddRef();
+  ComBase<IBaseFilter>::AddRef();
   return S_OK;
 }
 
