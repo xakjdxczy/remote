@@ -1,0 +1,41 @@
+:root {
+  --bg: #f4f7fb;
+  --text: #1b2433;
+  --muted: #66758b;
+  --card: #ffffff;
+  --line: #e4ebf3;
+  --primary: #2f80ed;
+  --primary-dark: #1b6ad6;
+  --ok: #1aa05a;
+  --shadow: 0 10px 30px rgba(22, 40, 70, 0.08);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+button { font: inherit; }
+code { background: #eef3f9; padding: 1px 6px; border-radius: 4px; }
+.wrap { padding: 24px 28px 36px; }
+.topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.topbar h1 { margin: 0; font-size: 24px; }
+.pill { padding: 6px 12px; border-radius: 999px; font-size: 13px; background: #e8edf4; color: var(--muted); }
+.pill.online { background: #e5f7ec; color: var(--ok); }
+.pill.busy { background: #e8f1fd; color: var(--primary); }
+.home-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 20px; }
+.card { background: var(--card); border-radius: 16px; padding: 24px; box-shadow: var(--shadow); }
+.card-kicker { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.id-label { color: var(--muted); font-size: 13px; }
+.device-id { font-size: 40px; letter-spacing: 2px; font-weight: 700; margin: 6px 0 18px; }
+.pass-tools { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.hint { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.cam-video { width: 100%; max-height: 360px; background: #0b1022; border-radius: 12px; margin: 8px 0 12px; }
+.cam-qr { display: block; width: 180px; height: 180px; margin: 12px 0; background: #fff; padding: 8px; border-radius: 12px; }
+.primary, .ghost {
+  border: 0; border-radius: 10px; padding: 10px 16px; cursor: pointer;
+}
+.primary { width: 100%; margin-top: 18px; background: var(--primary); color: #fff; }
+.primary:hover { background: var(--primary-dark); }
+.ghost { background: #eef4fc; color: var(--primary); }
+@media (max-width: 960px) {
+  .home-grid { grid-template-columns: 1fr; }
+  .device-id { font-size: 28px; }
+}

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>尘埃X · 手机摄像头</title>
+  <link rel="stylesheet" href="/cam.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <h1>手机摄像头</h1>
+      <div id="cam-status" class="pill">未连接</div>
+    </header>
+    <div class="home-grid">
+      <article class="card">
+        <div class="card-kicker">本机连接 · Wi‑Fi 或 USB 二选一 · 不经过公网</div>
+        <div class="pass-tools">
+          <button id="cam-mode-wifi" class="ghost" type="button">Wi‑Fi 局域网</button>
+          <button id="cam-mode-usb" class="ghost" type="button">USB</button>
+          <button id="cam-rotate" class="ghost" type="button">刷新配对码</button>
+          <button id="cam-wait" class="ghost" type="button">重新等待手机</button>
+        </div>
+        <div class="id-label" style="margin-top:16px">配对码（手机上填写）</div>
+        <div id="cam-token" class="device-id">------</div>
+        <div id="cam-wifi-help">
+          <div class="id-label">电脑局域网 IP</div>
+          <p id="cam-ips" class="hint"></p>
+          <img id="cam-qr" class="cam-qr" alt="配对二维码" hidden />
+          <p id="cam-pair-url" class="hint"></p>
+          <p class="hint">手机扫码，或打开尘埃X →「作为摄像头」，填 IP 和配对码。同一 Wi‑Fi 或一方开热点即可。</p>
+        </div>
+        <div id="cam-usb-help" hidden>
+          <p id="cam-usb-hint" class="hint"></p>
+          <code id="cam-usb-cmd"></code>
+          <button id="cam-adb" class="ghost" type="button" style="margin-top:10px;width:auto">准备 USB（adb reverse）</button>
+          <p id="cam-adb-status" class="hint"></p>
+          <p class="hint">USB 线本身不是网络。adb 先打开手机「USB 调试」（荣耀/华为还要开「仅充电模式下允许 ADB」），再点「准备 USB」：电脑会自动转发并打开手机 App，不用手填地址和配对码。不想开调试：用 USB 网络共享，填电脑在那条 USB 网上的 IP。</p>
+        </div>
+      </article>
+      <article class="card">
+        <div class="card-kicker">预览（会议软件请再开虚拟设备）</div>
+        <video id="cam-video" class="cam-video" autoplay playsinline controls></video>
+        <button id="cam-sink" class="primary" type="button">输出到系统摄像头 / 麦克风</button>
+        <p id="cam-sink-status" class="hint">点输出后，OBS / 会议软件选「尘埃X 摄像头」和「尘埃X 麦克风」。第一次会要管理员密码，把这两个虚拟设备装进系统。</p>
+      </article>
+    </div>
+  </div>
+  <script src="/cam.js"></script>
+</body>
+</html>

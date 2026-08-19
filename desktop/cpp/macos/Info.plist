@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>zh-Hans</string>
+  <key>CFBundleExecutable</key>
+  <string>尘埃X</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.dustx.remotedesk</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>尘埃X</string>
+  <key>CFBundleDisplayName</key>
+  <string>尘埃X</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>尘埃X 通过局域网或 USB 连接手机摄像头，流量不经过公网。</string>
+  <key>NSSystemExtensionUsageDescription</key>
+  <string>尘埃X 会安装自己的虚拟摄像头，会议软件才能选到「尘埃X 摄像头」。</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+    <key>NSAllowsArbitraryLoadsInWebContent</key>
+    <true/>
+  </dict>
+</dict>
+</plist>

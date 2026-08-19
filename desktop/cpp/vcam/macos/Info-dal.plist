@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>zh-Hans</string>
+  <key>CFBundleExecutable</key>
+  <string>DustXCam</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.dustx.remotedesk.camera.dal</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>尘埃X 摄像头</string>
+  <key>CFBundlePackageType</key>
+  <string>BNDL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFPlugInDynamicRegisterFunction</key>
+  <string></string>
+  <key>CFPlugInDynamicRegistration</key>
+  <false/>
+  <key>CFPlugInFactories</key>
+  <dict>
+    <key>A71C3E80-6D42-4F1B-9E3A-C4D8B2E91F72</key>
+    <string>PlugInMain</string>
+  </dict>
+  <key>CFPlugInTypes</key>
+  <dict>
+    <key>30010C1C-93BF-11D8-8B5B-000A95AF9C6A</key>
+    <array>
+      <string>A71C3E80-6D42-4F1B-9E3A-C4D8B2E91F72</string>
+    </array>
+  </dict>
+</dict>
+</plist>

@@ -1,0 +1,28 @@
+.mesh-pass { font-size: 28px; letter-spacing: 1px; }
+.mesh-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.mesh-input {
+  flex: 1;
+  min-width: 140px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  font: inherit;
+}
+.mesh-field { flex: 1; min-width: 140px; color: var(--muted); font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.mesh-mode {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.mesh-mode input { margin-top: 4px; }
+.mesh-mode strong { display: block; }
+.mesh-mode em { display: block; margin-top: 4px; color: var(--muted); font-style: normal; font-size: 13px; line-height: 1.45; }
+.mesh-mode.is-disabled { opacity: 0.55; cursor: not-allowed; }
+.mesh-error { color: #c0392b; }
+.mesh-log { white-space: pre-wrap; min-height: 3em; }

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>尘埃X · 跨网互访</title>
+  <link rel="stylesheet" href="/cam.css" />
+  <link rel="stylesheet" href="/mesh.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <h1>跨网互访</h1>
+      <div id="mesh-status" class="pill">未上线</div>
+    </header>
+    <div class="home-grid">
+      <article class="card">
+        <div class="card-kicker">两台都开着尘埃X，用识别码互加。共用现有信令 / ICE / TURN。</div>
+        <div class="id-label">本机互访识别码</div>
+        <div id="mesh-id" class="device-id">------</div>
+        <div class="id-label">临时密码</div>
+        <div id="mesh-pass" class="device-id mesh-pass">------</div>
+        <div class="pass-tools">
+          <button id="mesh-online" class="ghost" type="button">上线</button>
+          <button id="mesh-offline" class="ghost" type="button">下线</button>
+          <button id="mesh-refresh-pass" class="ghost" type="button">刷新密码</button>
+        </div>
+        <div class="id-label" style="margin-top:18px">连接对端</div>
+        <div class="mesh-row">
+          <input id="mesh-peer-id" class="mesh-input" placeholder="对端识别码" autocomplete="off" />
+          <input id="mesh-peer-pass" class="mesh-input" placeholder="对端密码" autocomplete="off" />
+        </div>
+        <div class="pass-tools">
+          <button id="mesh-connect" class="primary" type="button" style="margin-top:10px">连接对端</button>
+          <button id="mesh-hangup" class="ghost" type="button">断开</button>
+        </div>
+        <p id="mesh-error" class="hint mesh-error" hidden></p>
+      </article>
+      <article class="card">
+        <div class="card-kicker">互访方式（两边可以选不一样）</div>
+        <label class="mesh-mode" id="mesh-mode-tunnel-wrap">
+          <input type="radio" name="mesh-mode" id="mesh-mode-tunnel" value="tunnel" checked />
+          <span>
+            <strong>应用层隧道</strong>
+            <em>本机 127.0.0.1:本地端口 → 对端远程端口。Mac 默认这项，不装虚拟网卡。</em>
+          </span>
+        </label>
+        <label class="mesh-mode" id="mesh-mode-tun-wrap">
+          <input type="radio" name="mesh-mode" id="mesh-mode-tun" value="tun" />
+          <span>
+            <strong>虚拟网卡</strong>
+            <em id="mesh-tun-hint">Windows 用 Wintun 分 100.x；Mac 没有项目自己的 Network Extension 许可时不可用。</em>
+          </span>
+        </label>
+        <div class="mesh-row" style="margin-top:14px">
+          <label class="mesh-field">本地端口
+            <input id="mesh-local-port" class="mesh-input" type="number" min="1" max="65535" value="2222" />
+          </label>
+          <label class="mesh-field">对端端口
+            <input id="mesh-remote-port" class="mesh-input" type="number" min="1" max="65535" value="22" />
+          </label>
+        </div>
+        <div class="mesh-row">
+          <label class="mesh-field">本机 100.x
+            <input id="mesh-local-ip" class="mesh-input" value="100.64.0.1" />
+          </label>
+          <label class="mesh-field">对端 100.x
+            <input id="mesh-peer-ip" class="mesh-input" value="100.64.0.2" />
+          </label>
+        </div>
+        <p id="mesh-ssh" class="hint"></p>
+        <p id="mesh-log" class="hint mesh-log"></p>
+      </article>
+    </div>
+  </div>
+  <script src="/mesh.js"></script>
+</body>
+</html>

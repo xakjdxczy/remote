@@ -5,69 +5,59 @@ on:
   push:
     paths:
       - ".github/workflows/pack-desktop.yml"
-      - "desktop/**"
-      - "src/remote/**"
-      - "pyproject.toml"
-
-env:
-  PYTHONUTF8: "1"
-  PYTHONIOENCODING: utf-8
+      - "desktop/cpp/**"
 
 jobs:
-  windows:
-    runs-on: windows-latest
-    timeout-minutes: 45
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install pack extras
-        shell: bash
+      - name: Configure and build
         run: |
-          set -euo pipefail
-          python -m pip install -U pip
-          python -m pip install -e .
-          python -m pip install "pyinstaller>=6.0" "pywebview>=5.0" "mss>=9.0" "pynput>=1.7" "sounddevice>=0.5"
-          if ! python -m pip install "pyvirtualcam>=0.11"; then
-            echo "pyvirtualcam is optional; continuing without it" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          cmake -B desktop/cpp/build -S desktop/cpp -DCMAKE_BUILD_TYPE=Release
+          cmake --build desktop/cpp/build -j
 
-      - name: Build DustX.exe
-        shell: bash
+      - name: Stage app
         run: |
-          set -euo pipefail
-          python -X utf8 -m remote pack 2>&1 | tee pack.log
+          mkdir -p artifact
+          ditto desktop/cpp/build/尘埃X.app artifact/尘埃X.app
 
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: pack-log
-          path: pack.log
-          if-no-files-found: ignore
+          name: DustX-macos
+          path: artifact/尘埃X.app
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Stage artifact
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and build
         shell: bash
         run: |
-          set -euo pipefail
-          src=""
-          for cand in desktop/windows/DustX desktop/windows/尘埃X; do
-            if [[ -d "$cand" ]]; then
-              src="$cand"
-              break
-            fi
-          done
-          if [[ -z "$src" ]]; then
-            echo "missing packed Windows folder" >&2
-            ls -la desktop/windows || true
-            ls -la dist || true
-            exit 1
+          cmake -B desktop/cpp/build -S desktop/cpp -G "Visual Studio 17 2022" -A x64
+          cmake --build desktop/cpp/build --config Release -j
+
+      - name: Stage exe
+        shell: bash
+        run: |
+          mkdir -p artifact/DustX
+          cp desktop/cpp/build/Release/DustX.exe artifact/DustX/
+          cp desktop/cpp/build/Release/DustXCam.dll artifact/DustX/
+          cp desktop/cpp/build/Release/DustXMic.dll artifact/DustX/
+          if [ -f desktop/cpp/build/Release/wintun.dll ]; then
+            cp desktop/cpp/build/Release/wintun.dll artifact/DustX/
           fi
-          mkdir -p artifact
-          cp -R "$src" artifact/DustX
-          ls -la artifact/DustX | head
+          cp -R desktop/cpp/web artifact/DustX/web
+          if [ -d desktop/cpp/build/Release/platform-tools ]; then
+            cp -R desktop/cpp/build/Release/platform-tools artifact/DustX/platform-tools
+          fi
+          ls -la artifact/DustX
 
       - uses: actions/upload-artifact@v4
         with:
@@ -75,22 +65,3 @@ jobs:
           path: artifact/DustX
           if-no-files-found: error
           retention-days: 14
-
-      - name: Record failure
-        if: failure()
-        shell: bash
-        run: |
-          {
-            echo "## Pack failed"
-            echo
-            echo "Python: $(python -V 2>&1)"
-            echo
-            echo '```'
-            tail -n 120 pack.log || true
-            echo
-            python -m pip list || true
-            echo
-            ls -la dist || true
-            ls -la desktop/windows || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
