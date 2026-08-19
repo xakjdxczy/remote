@@ -127,6 +127,7 @@ if(APPLE)
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sign_mac.sh"
   )
 elseif(WIN32)
+  add_compile_options(/utf-8)
   add_library(DustXCam SHARED
     vcam/windows/dustx_cam.cpp
     src/vcam_shm.cpp

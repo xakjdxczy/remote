@@ -42,8 +42,18 @@ jobs:
         run: |
           set -euo pipefail
           cmake --version
-          cmake -B desktop/cpp/build -S desktop/cpp
-          cmake --build desktop/cpp/build --config Release --parallel
+          cmake -B desktop/cpp/build -S desktop/cpp 2>&1 | tee cmake-configure.log
+          cmake --build desktop/cpp/build --config Release --parallel 2>&1 | tee cmake-build.log
+
+      - name: Upload Windows CMake logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cmake-logs
+          path: |
+            cmake-configure.log
+            cmake-build.log
+          if-no-files-found: ignore
 
       - name: Stage exe
         shell: bash
