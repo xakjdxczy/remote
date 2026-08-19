@@ -104,6 +104,8 @@ class DustXFilter : public ComBase<IBaseFilter>, public IAMFilterMiscFlags {
  public:
   DustXFilter();
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** pp) override;
+  ULONG STDMETHODCALLTYPE AddRef() override { return ComBase<IBaseFilter>::AddRef(); }
+  ULONG STDMETHODCALLTYPE Release() override { return ComBase<IBaseFilter>::Release(); }
   ULONG STDMETHODCALLTYPE GetMiscFlags() override { return AM_FILTER_MISC_FLAGS_IS_SOURCE; }
   HRESULT STDMETHODCALLTYPE GetClassID(CLSID* id) override {
     *id = CLSID_DustXCam;
@@ -586,7 +588,7 @@ HRESULT DustXFilter::Run(REFERENCE_TIME) {
 }
 
 HRESULT DustXFilter::EnumPins(IEnumPins** e) {
-  *e = new EnumPins(pin_);
+  *e = new ::EnumPins(pin_);
   return S_OK;
 }
 

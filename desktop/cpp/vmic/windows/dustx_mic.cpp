@@ -53,13 +53,13 @@ class ComBase : public T {
 class Pin : public IPin, public IAMStreamConfig, public IKsPropertySet {
  public:
   explicit Pin(Filter* f) : filter_(f) {}
-  ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs_); }
-  ULONG STDMETHODCALLTYPE Release() override {
+  ULONG STDMETHODCALLTYPE AddRef() { return InterlockedIncrement(&refs_); }
+  ULONG STDMETHODCALLTYPE Release() {
     long n = InterlockedDecrement(&refs_);
     if (n == 0) delete this;
     return n;
   }
-  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** pp) override;
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** pp);
   HRESULT STDMETHODCALLTYPE Connect(IPin* receive, const AM_MEDIA_TYPE* mt) override;
   HRESULT STDMETHODCALLTYPE ReceiveConnection(IPin*, const AM_MEDIA_TYPE*) override { return E_FAIL; }
   HRESULT STDMETHODCALLTYPE Disconnect() override;
@@ -109,6 +109,8 @@ class Filter : public ComBase<IBaseFilter>, public IAMFilterMiscFlags {
  public:
   Filter();
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** pp) override;
+  ULONG STDMETHODCALLTYPE AddRef() override { return ComBase<IBaseFilter>::AddRef(); }
+  ULONG STDMETHODCALLTYPE Release() override { return ComBase<IBaseFilter>::Release(); }
   HRESULT STDMETHODCALLTYPE GetClassID(CLSID* id) override {
     *id = CLSID_DustXMic;
     return S_OK;
@@ -505,7 +507,7 @@ HRESULT Filter::Run(REFERENCE_TIME) {
 }
 
 HRESULT Filter::EnumPins(IEnumPins** e) {
-  *e = new EnumPins(pin_);
+  *e = new ::EnumPins(pin_);
   return S_OK;
 }
 
