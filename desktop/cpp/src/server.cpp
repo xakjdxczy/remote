@@ -1,6 +1,7 @@
 #include "server.hpp"
 
 #include "net.hpp"
+#include "ssh_host.hpp"
 #include "util.hpp"
 
 #include <algorithm>
@@ -290,6 +291,12 @@ std::string adb_json(int port, const std::string& token) {
   return o.str();
 }
 
+std::string with_ssh(std::string json) {
+  if (!json.empty() && json.back() == '}') json.pop_back();
+  json += ",\"ssh\":" + ssh_host_json(ssh_host_status()) + "}";
+  return json;
+}
+
 void apply_mesh_body(Mesh& mesh, const std::string& body) {
   if (body.empty()) return;
   MeshSettings s = mesh.settings();
@@ -331,7 +338,7 @@ std::string mesh_start_json(Mesh& mesh, const std::string& body) {
   if (!err.empty()) o << ",\"error\":\"" << json_escape(err) << "\"";
   if (!tun_err.empty()) o << ",\"tun_error\":\"" << json_escape(tun_err) << "\"";
   o << "}";
-  return o.str();
+  return with_ssh(o.str());
 }
 
 }  // namespace
@@ -493,16 +500,18 @@ void Server::handle_client(int fd) {
     http_reply(fd, 200, "OK", "application/json; charset=utf-8",
                "{\"ok\":true,\"running\":false,\"message\":\"已停止虚拟设备输出\"}");
   } else if (req.path == "/api/mesh" && req.method == "GET") {
-    http_reply(fd, 200, "OK", "application/json; charset=utf-8", mesh_.status_json());
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", with_ssh(mesh_.status_json()));
   } else if (req.path == "/api/mesh" && req.method == "POST") {
     apply_mesh_body(mesh_, req.body);
-    http_reply(fd, 200, "OK", "application/json; charset=utf-8", mesh_.status_json());
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", with_ssh(mesh_.status_json()));
   } else if (req.path == "/api/mesh/start" && req.method == "POST") {
     http_reply(fd, 200, "OK", "application/json; charset=utf-8", mesh_start_json(mesh_, req.body));
   } else if (req.path == "/api/mesh/stop" && req.method == "POST") {
     mesh_.stop_tun();
     mesh_.stop_proxy();
-    http_reply(fd, 200, "OK", "application/json; charset=utf-8", mesh_.status_json());
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", with_ssh(mesh_.status_json()));
+  } else if (req.path == "/api/ssh/enable" && req.method == "POST") {
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", ssh_host_json(ssh_host_enable()));
   } else if (req.path == "/api/mesh/tun/start" && req.method == "POST") {
     apply_mesh_body(mesh_, req.body);
     const MeshSettings s = mesh_.settings();
@@ -517,7 +526,7 @@ void Server::handle_client(int fd) {
     http_reply(fd, 200, "OK", "application/json; charset=utf-8", o.str());
   } else if (req.path == "/api/mesh/tun/stop" && req.method == "POST") {
     mesh_.stop_tun();
-    http_reply(fd, 200, "OK", "application/json; charset=utf-8", mesh_.status_json());
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", with_ssh(mesh_.status_json()));
   } else if (req.method == "GET") {
     std::string rel = req.path;
     if (rel == "/") rel = "/cam.html";

@@ -76,6 +76,30 @@ function settingsFromForm() {
   };
 }
 
+function sshHint(cfg) {
+  const port = cfg.local_port || 2222;
+  const ssh = cfg.ssh || {};
+  if (ssh.os === "windows" && ssh.username) {
+    return `对方连上后，在对方电脑执行：ssh -p ${port} ${ssh.username}@127.0.0.1`;
+  }
+  return `连上后在本机终端执行：ssh -p ${port} 对端Windows用户名@127.0.0.1`;
+}
+
+function applySsh(ssh) {
+  const status = $("mesh-ssh-status");
+  const btn = $("mesh-ssh-enable");
+  if (!status || !btn) return;
+  if (!ssh) {
+    status.textContent = "";
+    btn.hidden = true;
+    return;
+  }
+  status.textContent = ssh.message || "";
+  btn.hidden = !ssh.can_enable || ssh.ready;
+  btn.disabled = false;
+  btn.textContent = ssh.need_admin ? "请先以管理员运行" : "开启本机 SSH";
+}
+
 function applyCfg(cfg) {
   state.cfg = cfg;
   $("mesh-id").textContent = formatId(cfg.device_id) || "------";
@@ -91,7 +115,8 @@ function applyCfg(cfg) {
   $("mesh-mode-tun-wrap").classList.toggle("is-disabled", !cfg.tun_available);
   $("mesh-tun-hint").textContent = cfg.tun_reason || $("mesh-tun-hint").textContent;
   if (Array.isArray(cfg.ice_servers) && cfg.ice_servers.length) state.ice = cfg.ice_servers;
-  $("mesh-ssh").textContent = `ssh -p ${cfg.local_port || 2222} 用户名@127.0.0.1   （Cursor Remote SSH 也连这个地址）`;
+  $("mesh-ssh").textContent = sshHint(cfg);
+  applySsh(cfg.ssh);
 }
 
 async function api(path, method, body) {
@@ -411,12 +436,37 @@ async function detectPath() {
   }
 }
 
+async function enableSsh() {
+  const btn = $("mesh-ssh-enable");
+  const status = $("mesh-ssh-status");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "正在开启…";
+  }
+  if (status) status.textContent = "正在安装并启动 OpenSSH，可能要几分钟，请不要关闭尘埃X。";
+  try {
+    const data = await api("/api/ssh/enable", "POST");
+    if (state.cfg) state.cfg.ssh = data;
+    applySsh(data);
+    if (state.cfg) $("mesh-ssh").textContent = sshHint(state.cfg);
+    if (!data.ok) showError(data.message || "开启 SSH 失败");
+    else showError("");
+  } catch (e) {
+    showError(String(e.message || e));
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "开启本机 SSH";
+    }
+  }
+}
+
 function bind() {
   $("mesh-online")?.addEventListener("click", () => goOnline().catch((e) => showError(String(e.message || e))));
   $("mesh-offline")?.addEventListener("click", () => goOffline().catch((e) => showError(String(e.message || e))));
   $("mesh-connect")?.addEventListener("click", () => connectPeer().catch((e) => showError(String(e.message || e))));
   $("mesh-hangup")?.addEventListener("click", hangup);
   $("mesh-refresh-pass")?.addEventListener("click", () => sendSig({ type: "refresh_password" }));
+  $("mesh-ssh-enable")?.addEventListener("click", () => enableSsh().catch((e) => showError(String(e.message || e))));
   ["mesh-mode-tunnel", "mesh-mode-tun", "mesh-local-port", "mesh-remote-port", "mesh-local-ip", "mesh-peer-ip"].forEach((id) => {
     $(id)?.addEventListener("change", () => saveSettings().catch(() => {}));
   });

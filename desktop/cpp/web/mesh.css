@@ -26,3 +26,11 @@
 .mesh-mode.is-disabled { opacity: 0.55; cursor: not-allowed; }
 .mesh-error { color: #c0392b; }
 .mesh-log { white-space: pre-wrap; min-height: 3em; }
+.ssh-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: #f8fbff;
+}
+.ssh-panel .ghost { margin-top: 8px; }
