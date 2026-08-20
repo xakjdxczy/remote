@@ -23,7 +23,7 @@ bool port_open(int port) {
 
 }  // namespace
 
-SshHostStatus ssh_host_status() {
+SshHostStatus ssh_host_probe() {
   SshHostStatus s;
   s.os = "macos";
   s.username = current_user();
@@ -38,8 +38,8 @@ SshHostStatus ssh_host_status() {
   return s;
 }
 
-SshHostStatus ssh_host_enable() {
-  SshHostStatus s = ssh_host_status();
+SshHostStatus ssh_host_enable_work() {
+  SshHostStatus s = ssh_host_probe();
   s.ok = false;
   s.message = "Mac 请在「系统设置 → 通用 → 共享 → 远程登录」打开。连 Windows 则在 Windows 尘埃X 里一键开启。";
   return s;

@@ -1,5 +1,6 @@
 #include "mesh.hpp"
 
+#include "log.hpp"
 #include "mesh_tun.hpp"
 #include "net.hpp"
 #include "util.hpp"
@@ -176,9 +177,11 @@ bool Mesh::start_proxy(std::string* err) {
   }
   const int fd = listen_tcp_loopback(port);
   if (fd < 0) {
+    log_error("mesh", "无法在 127.0.0.1:" + std::to_string(port) + " 监听本地端口");
     if (err) *err = "无法在 127.0.0.1 监听本地端口，换一个端口再试。";
     return false;
   }
+  log_info("mesh", "应用层隧道监听 127.0.0.1:" + std::to_string(port));
   {
     std::lock_guard<std::mutex> lock(mu_);
     listen_fd_ = fd;
@@ -266,9 +269,11 @@ void Mesh::handle_open(uint32_t id) {
   }
   const int fd = connect_loopback(port);
   if (fd < 0) {
+    log_warn("mesh", "对端 OPEN 后无法连接本机 127.0.0.1:" + std::to_string(port));
     send_frame(kClose, id, nullptr, 0);
     return;
   }
+  log_info("mesh", "已把流 " + std::to_string(id) + " 接到 127.0.0.1:" + std::to_string(port));
   set_tcp_nodelay(fd);
   {
     std::lock_guard<std::mutex> lock(mu_);
@@ -344,6 +349,7 @@ bool Mesh::start_tun(const std::string& local_ip, const std::string& peer_ip, st
   stop_tun();
   std::string reason;
   if (!platform_tun_available(&reason)) {
+    log_warn("mesh", reason);
     if (err) *err = reason;
     return false;
   }
@@ -357,6 +363,8 @@ bool Mesh::start_tun(const std::string& local_ip, const std::string& peer_ip, st
     if (!peer_ip.empty()) settings_.peer_ip = peer_ip;
   }
   const bool ok = platform_tun_start(lip, pip, [this](const uint8_t* pkt, size_t n) { send_frame(kTun, 0, pkt, n); }, err);
+  log_info("mesh", std::string("虚拟网卡启动 ") + (ok ? "成功" : "失败") + " " + lip + " -> " + pip +
+                       (err && !err->empty() ? " " + *err : ""));
   {
     std::lock_guard<std::mutex> lock(mu_);
     tun_on_ = ok;

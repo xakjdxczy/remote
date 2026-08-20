@@ -1,5 +1,6 @@
 #include "server.hpp"
 
+#include "log.hpp"
 #include "net.hpp"
 #include "ssh_host.hpp"
 #include "util.hpp"
@@ -359,6 +360,7 @@ bool Server::start() {
   }
   if (listen_fd_ < 0) return false;
   running_ = true;
+  log_info("server", "本机服务已监听 127.0.0.1:" + std::to_string(port_));
   thread_ = std::thread([this] { accept_loop(); });
   return true;
 }
@@ -392,6 +394,9 @@ void Server::handle_client(int fd) {
   if (!read_http(fd, req)) {
     close_fd(fd);
     return;
+  }
+  if (req.path.rfind("/api/", 0) == 0 && req.method != "GET") {
+    log_info("http", req.method + " " + req.path);
   }
   const std::string upgrade = lower(header_get(req, "upgrade"));
   if (upgrade.find("websocket") != std::string::npos) {
@@ -511,7 +516,10 @@ void Server::handle_client(int fd) {
     mesh_.stop_proxy();
     http_reply(fd, 200, "OK", "application/json; charset=utf-8", with_ssh(mesh_.status_json()));
   } else if (req.path == "/api/ssh/enable" && req.method == "POST") {
-    http_reply(fd, 200, "OK", "application/json; charset=utf-8", ssh_host_json(ssh_host_enable()));
+    ssh_host_start_enable();
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", ssh_host_json(ssh_host_status()));
+  } else if (req.path == "/api/logs" && req.method == "GET") {
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", logs_payload_json());
   } else if (req.path == "/api/mesh/tun/start" && req.method == "POST") {
     apply_mesh_body(mesh_, req.body);
     const MeshSettings s = mesh_.settings();

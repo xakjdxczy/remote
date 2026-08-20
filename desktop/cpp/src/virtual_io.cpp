@@ -1,5 +1,6 @@
 #include "virtual_io.hpp"
 
+#include "log.hpp"
 #include "vcam_install.hpp"
 #include "vmic_shm.hpp"
 
@@ -45,6 +46,7 @@ bool VirtualIO::start() {
   cam_ok_ = open_camera();
   mic_ok_ = open_mic();
   running_ = true;
+  log_info("vio", std::string("虚拟设备输出 摄像头=") + (cam_ok_ ? "开" : "关") + " 麦克风=" + (mic_ok_ ? "开" : "关"));
   impl_->stop_test = false;
   impl_->got_video = false;
   impl_->got_audio = false;

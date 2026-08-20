@@ -6,6 +6,7 @@
 #endif
 
 #include "mesh_tun.hpp"
+#include "log.hpp"
 
 #include <windows.h>
 #include <winsock2.h>
@@ -224,10 +225,12 @@ bool platform_tun_start(const std::string& local_ip, const std::string& peer_ip,
   platform_tun_stop();
   std::string reason;
   if (!load_wintun(&reason)) {
+    log_error("tun", reason);
     if (err) *err = reason;
     return false;
   }
   if (!is_admin()) {
+    log_error("tun", "当前进程没有管理员权限");
     if (err) *err = "开启虚拟网卡需要管理员权限（Wintun 装适配器）。应用层隧道不需要。";
     return false;
   }
@@ -238,9 +241,11 @@ bool platform_tun_start(const std::string& local_ip, const std::string& peer_ip,
   WINTUN_ADAPTER_HANDLE adapter = g_api.CreateAdapter(L"尘埃X", L"DustX", nullptr);
   if (!adapter && g_api.OpenAdapter) adapter = g_api.OpenAdapter(L"尘埃X");
   if (!adapter) {
+    log_error("tun", "无法创建或打开 Wintun 适配器");
     if (err) *err = "无法创建 Wintun 适配器。请用管理员运行，或检查 wintun.dll。";
     return false;
   }
+  log_info("tun", "已创建 Wintun 适配器 " + lip + " 对端 " + pip);
 
   NET_LUID luid{};
   if (g_api.GetAdapterLUID) g_api.GetAdapterLUID(adapter, &luid);

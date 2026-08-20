@@ -1,5 +1,6 @@
 #include "cam_hub.hpp"
 
+#include "log.hpp"
 #include "net.hpp"
 #include "util.hpp"
 
@@ -64,6 +65,7 @@ bool CamHub::attach(const std::shared_ptr<WsPeer>& peer, const std::string& role
   {
     std::lock_guard<std::mutex> lock(mu_);
     if (token != token_) {
+      log_warn("cam", "配对码错误 role=" + role);
       peer->send_text("{\"type\":\"error\",\"message\":\"配对码错误\"}");
       return false;
     }
@@ -82,6 +84,7 @@ bool CamHub::attach(const std::shared_ptr<WsPeer>& peer, const std::string& role
     old->send_text("{\"type\":\"replaced\"}");
   }
   peer->send_text(std::string("{\"type\":\"hello_ok\",\"role\":\"") + json_escape(role) + "\"}");
+  log_info("cam", "已接入 " + role);
   broadcast_ready();
   return true;
 }

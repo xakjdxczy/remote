@@ -96,8 +96,9 @@ function applySsh(ssh) {
   }
   status.textContent = ssh.message || "";
   btn.hidden = !ssh.can_enable || ssh.ready;
-  btn.disabled = false;
-  btn.textContent = ssh.need_admin ? "请先以管理员运行" : "开启本机 SSH";
+  btn.disabled = !!ssh.busy;
+  if (ssh.busy) btn.textContent = "正在开启…";
+  else btn.textContent = ssh.need_admin ? "请先以管理员运行" : "开启本机 SSH";
 }
 
 function applyCfg(cfg) {
@@ -443,14 +444,24 @@ async function enableSsh() {
     btn.disabled = true;
     btn.textContent = "正在开启…";
   }
-  if (status) status.textContent = "正在安装并启动 OpenSSH，可能要几分钟，请不要关闭尘埃X。";
+  if (status) status.textContent = "正在开启本机 SSH，进度见下方运行日志。";
   try {
     const data = await api("/api/ssh/enable", "POST");
     if (state.cfg) state.cfg.ssh = data;
     applySsh(data);
-    if (state.cfg) $("mesh-ssh").textContent = sshHint(state.cfg);
-    if (!data.ok) showError(data.message || "开启 SSH 失败");
-    else showError("");
+    const started = Date.now();
+    while (Date.now() - started < 10 * 60 * 1000) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const cfg = await api("/api/mesh");
+      applyCfg(cfg);
+      if (window.refreshLogs) window.refreshLogs();
+      if (!cfg.ssh || !cfg.ssh.busy) {
+        if (cfg.ssh && cfg.ssh.ok === false) showError(cfg.ssh.message || "开启 SSH 失败");
+        else showError("");
+        return;
+      }
+    }
+    showError("开启 SSH 超时，请看下方运行日志。");
   } catch (e) {
     showError(String(e.message || e));
     if (btn) {

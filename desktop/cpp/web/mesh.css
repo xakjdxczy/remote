@@ -34,3 +34,17 @@
   background: #f8fbff;
 }
 .ssh-panel .ghost { margin-top: 8px; }
+.log-box { margin-top: 20px; background: var(--card); border-radius: 16px; padding: 16px 20px; box-shadow: var(--shadow); }
+.log-box summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+.log-pre {
+  margin: 8px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  font: 12px/1.45 ui-monospace, Consolas, monospace;
+  background: #0f1724;
+  color: #d7e3f4;
+  border-radius: 10px;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
