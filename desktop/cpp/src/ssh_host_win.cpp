@@ -48,6 +48,41 @@ std::wstring system_exe(const wchar_t* name) {
   return std::wstring(dir) + L"\\" + name;
 }
 
+std::wstring module_dir() {
+  wchar_t path[MAX_PATH];
+  GetModuleFileNameW(nullptr, path, MAX_PATH);
+  std::wstring w(path);
+  const auto slash = w.find_last_of(L"\\/");
+  if (slash != std::wstring::npos) w.resize(slash);
+  return w;
+}
+
+std::wstring bundled_openssh_dir() { return module_dir() + L"\\openssh"; }
+
+std::wstring powershell_exe() { return system_exe(L"WindowsPowerShell\\v1.0\\powershell.exe"); }
+
+int run_hidden(const std::wstring& exe, const std::wstring& args, const char* tag, DWORD timeout_ms,
+               const wchar_t* cwd = nullptr);
+bool service_exists(const wchar_t* name);
+
+bool install_bundled_openssh(std::string* err) {
+  const std::wstring dir = bundled_openssh_dir();
+  const std::wstring ps1 = dir + L"\\install-sshd.ps1";
+  if (GetFileAttributesW(ps1.c_str()) == INVALID_FILE_ATTRIBUTES) {
+    log_error("ssh", "安装包里没有 openssh\\install-sshd.ps1，请重新下载官网 Windows 程序");
+    if (err) *err = "当前尘埃X 安装包不完整，请到官网重新下载 Windows 桌面程序。";
+    return false;
+  }
+  log_info("ssh", "使用自带 OpenSSH：" + wide_to_utf8(ps1));
+  const std::wstring args = L"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + ps1 + L"\"";
+  const int code = run_hidden(powershell_exe(), args, "openssh", 120000, dir.c_str());
+  if (code != 0 && !service_exists(L"sshd")) {
+    if (err) *err = "安装自带 OpenSSH 失败，原因见运行日志。";
+    return false;
+  }
+  return true;
+}
+
 std::string win_err(DWORD code) {
   wchar_t* buf = nullptr;
   FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr,
@@ -80,8 +115,8 @@ void flush_lines(std::string& acc, const char* tag) {
   acc.erase(0, pos);
 }
 
-int run_hidden(const std::wstring& exe, const std::wstring& args, const char* tag, DWORD timeout_ms) {
-  log_info(tag, "启动 " + wide_to_utf8(exe) + " " + wide_to_utf8(args));
+int run_hidden(const std::wstring& exe, const std::wstring& args, const char* tag, DWORD timeout_ms,
+               const wchar_t* cwd) {
   SECURITY_ATTRIBUTES sa{};
   sa.nLength = sizeof(sa);
   sa.bInheritHandle = TRUE;
@@ -105,7 +140,7 @@ int run_hidden(const std::wstring& exe, const std::wstring& args, const char* ta
   std::wstring cmd = L"\"" + exe + L"\" " + args;
   std::vector<wchar_t> buf(cmd.begin(), cmd.end());
   buf.push_back(0);
-  const BOOL ok = CreateProcessW(exe.c_str(), buf.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+  const BOOL ok = CreateProcessW(exe.c_str(), buf.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, cwd, &si, &pi);
   CloseHandle(write_pipe);
   if (!ok) {
     log_error(tag, std::string("CreateProcess 失败 ") + win_err(GetLastError()));
@@ -260,7 +295,7 @@ SshHostStatus ssh_host_probe() {
   } else if (service_exists(L"sshd") && !service_running(L"sshd")) {
     s.message = "已安装 OpenSSH，但服务没开。点「开启本机 SSH」即可启动。";
   } else {
-    s.message = "这台电脑还不能被 SSH 登录。点「开启本机 SSH」，尘埃X 会安装并启动 Windows 自带的 OpenSSH，不用命令行。";
+    s.message = "这台电脑还不能被 SSH 登录。点「开启本机 SSH」，尘埃X 会安装自带的 OpenSSH，不走 Windows 更新。";
   }
   return s;
 }
@@ -282,7 +317,7 @@ SshHostStatus ssh_host_enable_work() {
   }
 
   if (service_exists(L"sshd")) {
-    log_info("ssh", "已有 sshd，跳过 DISM 安装");
+    log_info("ssh", "已有 sshd，跳过安装");
     std::string err;
     if (!start_sshd(&err)) {
       s.ok = false;
@@ -290,18 +325,12 @@ SshHostStatus ssh_host_enable_work() {
       return s;
     }
   } else {
-    log_info("ssh", "未找到 sshd，开始 DISM 安装 OpenSSH.Server");
-    const int code = run_hidden(system_exe(L"dism.exe"),
-                                L"/Online /Add-Capability /CapabilityName:OpenSSH.Server~~~~0.0.1.0 /NoRestart", "dism",
-                                8 * 60 * 1000);
-    const bool have = service_exists(L"sshd");
-    log_info("ssh", std::string("DISM 结束 code=") + std::to_string(code) + " sshd=" + (have ? "有" : "无"));
-    if (code != 0 && !have) {
+    std::string err;
+    if (!install_bundled_openssh(&err)) {
       s.ok = false;
-      s.message = "安装 OpenSSH 失败。完整原因见下方运行日志。";
+      s.message = err;
       return s;
     }
-    std::string err;
     if (!start_sshd(&err)) {
       s.ok = false;
       s.message = err.empty() ? "OpenSSH 已安装，但没能启动服务。" : err;

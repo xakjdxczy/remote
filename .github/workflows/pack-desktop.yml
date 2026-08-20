@@ -66,6 +66,9 @@ jobs:
             cp desktop/cpp/build/Release/wintun.dll artifact/DustX/
           fi
           cp -R desktop/cpp/web artifact/DustX/web
+          if [ -d desktop/cpp/build/Release/openssh ]; then
+            cp -R desktop/cpp/build/Release/openssh artifact/DustX/openssh
+          fi
           if [ -d desktop/cpp/build/Release/platform-tools ]; then
             cp -R desktop/cpp/build/Release/platform-tools artifact/DustX/platform-tools
           fi

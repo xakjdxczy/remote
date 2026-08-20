@@ -191,6 +191,22 @@ elseif(WIN32)
   else()
     set(WINTUN_DLL "${wintun_SOURCE_DIR}/bin/x86/wintun.dll")
   endif()
+  FetchContent_Declare(
+    win32openssh
+    URL https://github.com/PowerShell/Win32-OpenSSH/releases/download/v9.5.0.0p1-Beta/OpenSSH-Win64.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  FetchContent_GetProperties(win32openssh)
+  if(NOT win32openssh_POPULATED)
+    FetchContent_Populate(win32openssh)
+  endif()
+  if(EXISTS "${win32openssh_SOURCE_DIR}/install-sshd.ps1")
+    set(OPENSSH_DIR "${win32openssh_SOURCE_DIR}")
+  elseif(EXISTS "${win32openssh_SOURCE_DIR}/OpenSSH-Win64/install-sshd.ps1")
+    set(OPENSSH_DIR "${win32openssh_SOURCE_DIR}/OpenSSH-Win64")
+  else()
+    message(FATAL_ERROR "OpenSSH-Win64.zip 里没有 install-sshd.ps1")
+  endif()
   add_custom_command(TARGET DustX POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_CURRENT_SOURCE_DIR}/web"
@@ -204,6 +220,9 @@ elseif(WIN32)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${WINTUN_DLL}"
       "$<TARGET_FILE_DIR:DustX>/wintun.dll"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${OPENSSH_DIR}"
+      "$<TARGET_FILE_DIR:DustX>/openssh"
   )
   if(DEFINED DUSTX_PLATFORM_TOOLS)
     add_custom_command(TARGET DustX POST_BUILD

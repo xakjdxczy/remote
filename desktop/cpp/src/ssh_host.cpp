@@ -34,7 +34,7 @@ SshHostStatus ssh_host_status() {
   SshHostStatus s = ssh_host_probe();
   s.busy = g_busy.load();
   if (s.busy) {
-    s.message = "正在安装 OpenSSH，请看下方日志里的 dism 行。sshd 还没装上是正常的。";
+    s.message = "正在安装尘埃X 自带的 OpenSSH，不走 Windows 更新。进度见下方日志。";
   }
   return s;
 }
