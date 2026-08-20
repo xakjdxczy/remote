@@ -34,7 +34,7 @@ SshHostStatus ssh_host_status() {
   SshHostStatus s = ssh_host_probe();
   s.busy = g_busy.load();
   if (s.busy) {
-    s.message = "正在开启本机 SSH，进度见下方运行日志。";
+    s.message = "正在安装 OpenSSH，请看下方日志里的 dism 行。sshd 还没装上是正常的。";
   }
   return s;
 }

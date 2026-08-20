@@ -158,13 +158,9 @@ int run_hidden(const std::wstring& exe, const std::wstring& args, const char* ta
 
 bool service_exists(const wchar_t* name) {
   SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-  if (!scm) {
-    log_warn("ssh", std::string("OpenSCManager 失败 ") + win_err(GetLastError()));
-    return false;
-  }
+  if (!scm) return false;
   SC_HANDLE svc = OpenServiceW(scm, name, SERVICE_QUERY_STATUS);
   const bool ok = svc != nullptr;
-  if (!ok) log_info("ssh", std::string("服务不存在 ") + wide_to_utf8(name) + " " + win_err(GetLastError()));
   if (svc) CloseServiceHandle(svc);
   CloseServiceHandle(scm);
   return ok;
