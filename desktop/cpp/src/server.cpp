@@ -1,5 +1,6 @@
 #include "server.hpp"
 
+#include "agent.hpp"
 #include "log.hpp"
 #include "net.hpp"
 #include "ssh_host.hpp"
@@ -520,6 +521,8 @@ void Server::handle_client(int fd) {
     http_reply(fd, 200, "OK", "application/json; charset=utf-8", ssh_host_json(ssh_host_status()));
   } else if (req.path == "/api/logs" && req.method == "GET") {
     http_reply(fd, 200, "OK", "application/json; charset=utf-8", logs_payload_json());
+  } else if (req.path == "/api/agent/run" && req.method == "POST") {
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", agent_run(req.body));
   } else if (req.path == "/api/mesh/tun/start" && req.method == "POST") {
     apply_mesh_body(mesh_, req.body);
     const MeshSettings s = mesh_.settings();

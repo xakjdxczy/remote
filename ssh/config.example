@@ -1,0 +1,26 @@
+# 本机 ~/.ssh/config 可用同一套 Host。密钥不要提交仓库。
+#
+# Mac 这条 Cursor 会话是控制面：ssh 到各机执行，不必为运维多开 Remote-SSH。
+
+Host dustx-windows
+  HostName 127.0.0.1
+  Port 2222
+  User YOUR_WINDOWS_USERNAME
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+  ServerAliveInterval 15
+  ServerAliveCountMax 12
+  TCPKeepAlive yes
+
+Host dustx-vps
+  HostName 117.72.108.246
+  User root
+  IdentityFile ~/.ssh/id_ed25519_dustx_vps
+  IdentitiesOnly yes
+  ServerAliveInterval 15
+
+# Host dustx-linux
+#   HostName YOUR_LINUX_IP
+#   User YOUR_LINUX_USER
+#   IdentityFile ~/.ssh/id_ed25519_YOUR_LINUX
+#   IdentitiesOnly yes

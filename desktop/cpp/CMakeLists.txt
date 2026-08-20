@@ -12,6 +12,7 @@ set(DUSTX_COMMON
   src/net.cpp
   src/util.cpp
   src/log.cpp
+  src/agent.cpp
   src/virtual_io.cpp
   src/vcam_shm.cpp
   src/vmic_shm.cpp

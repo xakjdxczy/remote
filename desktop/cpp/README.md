@@ -4,7 +4,7 @@
 
 - **远程控制**：打开官网控制台（默认 `https://117.72.108.246/remote/`）
 - **手机摄像头**：本机 HTTP/WebSocket 配对服务，只走局域网或 USB
-- **跨网互访**：两台尘埃X 用识别码互加。默认应用层隧道（`127.0.0.1:2222` → 对端 `:22`）；Windows 可选 Wintun 虚拟网卡。Mac 没有项目自己的 Network Extension 许可时，「虚拟网卡」不可用。
+- **跨网互访**：两台尘埃X 用识别码互加。默认应用层隧道（`127.0.0.1:2222` → 对端 `:22`）；Windows 可选 Wintun 虚拟网卡。Mac 没有项目自己的 Network Extension 许可时，「虚拟网卡」不可用。云端可用 `python -m remote mesh` 走同一条打洞隧道，或 `python -m remote agent` 走不占 P2P 的应用协议（主机上线后，信令 `POST /api/agent` → 本机 `POST /api/agent/run`）。
 
 手机 App 协议不变：`dustcam://ip:port/token`，`/cam/ws` 的 `hello` / `signal` / `ready`。
 
@@ -33,6 +33,7 @@ cmake --build build --config Release
 环境变量：
 
 - `DUSTX_REMOTE_URL` 远程控制页
+- `DUSTX_AGENT_ROOT` 应用协议 list/read/write/exec 的根目录（默认用户主目录）
 - `DUSTX_CAM_PORT` 本机配对端口（默认 18790）
 - `DUSTX_SIGN_IDENTITY` macOS 正式签名身份。不设则 ad-hoc，不会去钥匙串里抓公司的 Developer ID。
 

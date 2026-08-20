@@ -307,6 +307,10 @@ function onSigMessage(ev) {
     };
     showError(map[msg.message] || msg.message || "连接失败");
     setStatus("已上线", "online");
+  } else if (msg.type === "agent") {
+    handleAgent(msg).catch((e) => {
+      sendSig({ type: "agent_result", id: msg.id, ok: false, error: String(e.message || e) });
+    });
   } else if (msg.type === "incoming_call") {
     const name = String(msg.viewer_name || "");
     const mesh = /mesh/i.test(name);
@@ -435,6 +439,31 @@ async function detectPath() {
   } catch {
     log("通道已接通。");
   }
+}
+
+async function handleAgent(msg) {
+  const op = String(msg.op || "");
+  log(`应用协议：${op || "unknown"}`);
+  let result = { ok: false, error: "agent failed" };
+  try {
+    result = await api("/api/agent/run", "POST", msg);
+  } catch (e) {
+    result = { ok: false, error: String(e.message || e) };
+  }
+  sendSig({
+    type: "agent_result",
+    id: msg.id,
+    ok: !!result.ok,
+    error: result.error,
+    op: result.op || op,
+    path: result.path,
+    content: result.content,
+    entries: result.entries,
+    bytes: result.bytes,
+    exit: result.exit,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  });
 }
 
 async function enableSsh() {

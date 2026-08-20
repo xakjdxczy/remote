@@ -8,10 +8,12 @@ import os
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -37,7 +39,12 @@ registry = Registry()
 demo_host: dict[str, str] | None = None
 SERVER_START = time.time()
 CALL_TIMEOUT_SEC = 45
+AGENT_TIMEOUT_SEC = 60
+AGENT_MAX_CONTENT = 1 << 20
+AGENT_OPS = frozenset({"list", "read", "write", "exec"})
 _pending_timers: dict[str, asyncio.Task] = {}
+# request_id -> (host_id, future)
+_agent_pending: dict[str, tuple[str, asyncio.Future]] = {}
 
 
 def _net_bytes() -> int | None:
@@ -109,10 +116,20 @@ def _scrape_coturn_bytes() -> int | None:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="RemoteDesk", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         return {"ok": True, **registry.stats()}
+
+    @app.post("/api/agent")
+    async def agent_http(body: dict[str, Any]) -> Any:
+        return await _dispatch_agent(body)
 
     @app.get("/api/stats")
     async def stats() -> dict[str, Any]:
@@ -144,15 +161,17 @@ def create_app() -> FastAPI:
             }
         return payload
 
-    @app.get("/api/downloads/android")
-    async def android_download(redirect: int = 0) -> Any:
-        """Issue a short-lived OSS download URL for the Android APK.
+    @app.get("/api/downloads/{kind}")
+    async def official_download(kind: str, redirect: int = 0) -> Any:
+        """Issue a short-lived OSS download URL for an official package.
 
         Official-site JS fetches this as JSON, then the browser downloads from
         OSS. ``?redirect=1`` 302s for no-JS / direct links.
         """
+        if kind not in oss.DOWNLOAD_KINDS:
+            raise HTTPException(status_code=404, detail="unknown download")
         try:
-            payload = await asyncio.to_thread(oss.apk_download_payload)
+            payload = await asyncio.to_thread(oss.download_payload, kind)
         except oss.OssError as exc:
             message = str(exc)
             status = 503 if "not configured" in message else 404
@@ -288,6 +307,8 @@ async def _handle_text(ws: WebSocket, raw: str) -> None:
         await _on_hangup(ws, msg)
     elif kind == "signal":
         await _on_signal(ws, msg, raw)
+    elif kind == "agent_result":
+        await _on_agent_result(ws, msg)
     elif kind == "ping":
         device = registry.lookup_by_ws(ws)
         if device:
@@ -497,8 +518,81 @@ async def _end_and_notify(session_id: str, reason: str) -> None:
             pass
 
 
+async def _fail_agent_pending(host_id: str | None) -> None:
+    if not host_id:
+        return
+    for rid, (hid, fut) in list(_agent_pending.items()):
+        if hid != host_id:
+            continue
+        _agent_pending.pop(rid, None)
+        if fut and not fut.done():
+            fut.set_result({"ok": False, "error": "host disconnected", "id": rid})
+
+
+async def _on_agent_result(ws: WebSocket, msg: dict[str, Any]) -> None:
+    if not registry.lookup_by_ws(ws):
+        return
+    rid = str(msg.get("id") or "")
+    item = _agent_pending.pop(rid, None)
+    if not item:
+        return
+    _host_id, fut = item
+    if fut and not fut.done():
+        fut.set_result(msg)
+
+
+async def _dispatch_agent(body: dict[str, Any]) -> Any:
+    device_id = normalize_device_id(str(body.get("device_id") or ""))
+    password = str(body.get("password") or "")
+    op = str(body.get("op") or "").strip().lower()
+    if len(device_id) != 9 or not password:
+        return JSONResponse({"ok": False, "error": "device_id and password required"}, status_code=400)
+    if op not in AGENT_OPS:
+        return JSONResponse({"ok": False, "error": "unknown op (list/read/write/exec)"}, status_code=400)
+    content = str(body.get("content") or "")
+    if len(content.encode("utf-8")) > AGENT_MAX_CONTENT:
+        return JSONResponse({"ok": False, "error": "content too large"}, status_code=413)
+    host = registry.get(device_id)
+    if not host:
+        return JSONResponse({"ok": False, "error": "device offline"}, status_code=404)
+    if not constant_time_equals(password, host.temp_password):
+        return JSONResponse({"ok": False, "error": "wrong password"}, status_code=403)
+    rid = uuid.uuid4().hex
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    _agent_pending[rid] = (host.device_id, fut)
+    payload = {
+        "type": "agent",
+        "id": rid,
+        "op": op,
+        "path": str(body.get("path") or ""),
+        "content": content,
+        "command": str(body.get("command") or ""),
+        "cwd": str(body.get("cwd") or ""),
+    }
+    try:
+        await host.ws.send_text(encode_json(payload))
+    except Exception:
+        _agent_pending.pop(rid, None)
+        return JSONResponse({"ok": False, "error": "host send failed"}, status_code=502)
+    logger.info("agent %s -> %s op=%s", rid[:8], device_id, op)
+    try:
+        result = await asyncio.wait_for(fut, timeout=AGENT_TIMEOUT_SEC)
+    except asyncio.TimeoutError:
+        _agent_pending.pop(rid, None)
+        return JSONResponse({"ok": False, "error": "timeout"}, status_code=504)
+    if not isinstance(result, dict):
+        return JSONResponse({"ok": False, "error": "invalid agent_result"}, status_code=502)
+    out = {k: v for k, v in result.items() if k not in {"type", "v"}}
+    out.setdefault("ok", False)
+    return out
+
+
 async def _cleanup(ws: WebSocket) -> None:
+    device = registry.lookup_by_ws(ws)
+    host_id = device.device_id if device else None
     dropped = registry.unregister(ws)
+    await _fail_agent_pending(host_id)
     for session in dropped:
         payload = encode_json(
             {"type": "session_end", "session_id": session.session_id, "reason": "peer_disconnected"}

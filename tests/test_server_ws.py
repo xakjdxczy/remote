@@ -29,6 +29,15 @@ def test_health_and_config(monkeypatch):
             assert url.startswith("stun:")
 
 
+def test_config_allows_desktop_origin(monkeypatch):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    monkeypatch.setattr(server_mod, "demo_host", None)
+    client = TestClient(create_app())
+    cfg = client.get("/api/config", headers={"Origin": "http://127.0.0.1:18790"})
+    assert cfg.status_code == 200
+    assert cfg.headers.get("access-control-allow-origin") in {"*", "http://127.0.0.1:18790"}
+
+
 def test_register_connect_and_signal_only(monkeypatch):
     monkeypatch.setattr(server_mod, "registry", Registry())
     client = TestClient(create_app())
@@ -122,6 +131,28 @@ def test_android_download_json_and_redirect(monkeypatch):
     bounced = client.get("/api/downloads/android?redirect=1", follow_redirects=False)
     assert bounced.status_code == 302
     assert bounced.headers["location"] == "https://bucket.example/app.apk?sig=1"
+
+
+def test_desktop_download_json_and_unknown_kind(monkeypatch):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+
+    def fake_payload(kind):
+        return {
+            "ok": True,
+            "url": f"https://bucket.example/{kind}.zip?sig=1",
+            "filename": f"{kind}.zip",
+            "expires_in": 600,
+        }
+
+    monkeypatch.setattr(server_mod.oss, "download_payload", fake_payload)
+    client = TestClient(create_app())
+    mac = client.get("/api/downloads/macos")
+    assert mac.status_code == 200
+    assert mac.json()["filename"] == "macos.zip"
+    win = client.get("/api/downloads/windows?redirect=1", follow_redirects=False)
+    assert win.status_code == 302
+    assert win.headers["location"].endswith("windows.zip?sig=1")
+    assert client.get("/api/downloads/nope").status_code == 404
 
 
 def test_android_download_unavailable(monkeypatch):

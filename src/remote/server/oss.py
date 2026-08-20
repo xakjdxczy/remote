@@ -21,6 +21,7 @@ import os
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
@@ -33,8 +34,16 @@ from typing import Any
 
 DEFAULT_APK_KEY = "downloads/remotedesk-android.bin"
 DEFAULT_META_KEY = "downloads/remotedesk-android.json"
+DEFAULT_MACOS_KEY = "downloads/dustx-macos.bin"
+DEFAULT_MACOS_META_KEY = "downloads/dustx-macos.json"
+DEFAULT_WINDOWS_KEY = "downloads/dustx-windows.bin"
+DEFAULT_WINDOWS_META_KEY = "downloads/dustx-windows.json"
 DEFAULT_EXPIRES = 600
 DOWNLOAD_FILENAME = "remotedesk-android.apk"
+MACOS_FILENAME = "dustx-macos.zip"
+WINDOWS_FILENAME = "DustX-windows.zip"
+
+DOWNLOAD_KINDS = ("android", "macos", "windows")
 
 
 class OssError(RuntimeError):
@@ -76,16 +85,50 @@ def _infer_region(endpoint: str) -> str:
     return "us-east-1"
 
 
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _oss_ini_path() -> Path | None:
+    override = (os.environ.get("DUSTX_OSS_CONFIG") or "").strip()
+    if override:
+        path = Path(override)
+        return path if path.is_file() else None
+    for cand in (_repo_root() / ".env" / "config.ini", Path.cwd() / ".env" / "config.ini"):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _ini_oss_values() -> dict[str, str]:
+    path = _oss_ini_path()
+    if path is None:
+        return {}
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.startswith("OSS_") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def _oss_get(name: str, file_env: dict[str, str] | None = None) -> str:
+    file_env = file_env if file_env is not None else _ini_oss_values()
+    return (os.environ.get(name) or file_env.get(name) or "").strip()
+
+
 def load_config() -> OssConfig | None:
-    ak = (os.environ.get("OSS_AK") or "").strip()
-    sk = (os.environ.get("OSS_SK") or "").strip()
-    endpoint = _strip_endpoint(os.environ.get("OSS_ENDPOINT") or "")
-    bucket = (os.environ.get("OSS_BUCKET") or "").strip()
+    file_env = _ini_oss_values()
+    ak = _oss_get("OSS_AK", file_env)
+    sk = _oss_get("OSS_SK", file_env)
+    endpoint = _strip_endpoint(_oss_get("OSS_ENDPOINT", file_env))
+    bucket = _oss_get("OSS_BUCKET", file_env)
     if not (ak and sk and endpoint and bucket):
         return None
-    region = (os.environ.get("OSS_REGION") or "").strip() or _infer_region(endpoint)
-    apk_key = (os.environ.get("OSS_APK_KEY") or DEFAULT_APK_KEY).lstrip("/")
-    meta_key = (os.environ.get("OSS_META_KEY") or DEFAULT_META_KEY).lstrip("/")
+    region = _oss_get("OSS_REGION", file_env) or _infer_region(endpoint)
+    apk_key = (_oss_get("OSS_APK_KEY", file_env) or DEFAULT_APK_KEY).lstrip("/")
+    meta_key = (_oss_get("OSS_META_KEY", file_env) or DEFAULT_META_KEY).lstrip("/")
     return OssConfig(
         access_key=ak,
         secret_key=sk,
@@ -95,6 +138,38 @@ def load_config() -> OssConfig | None:
         apk_key=apk_key,
         meta_key=meta_key,
     )
+
+
+def _kind_spec(kind: str, cfg: OssConfig) -> dict[str, str]:
+    name = (kind or "").strip().lower()
+    if name == "android":
+        return {
+            "kind": "android",
+            "key": cfg.apk_key,
+            "meta_key": cfg.meta_key,
+            "filename": DOWNLOAD_FILENAME,
+            "content_type": "application/vnd.android.package-archive",
+            "missing": "android package is not uploaded",
+        }
+    if name == "macos":
+        return {
+            "kind": "macos",
+            "key": (os.environ.get("OSS_MACOS_KEY") or DEFAULT_MACOS_KEY).lstrip("/"),
+            "meta_key": (os.environ.get("OSS_MACOS_META_KEY") or DEFAULT_MACOS_META_KEY).lstrip("/"),
+            "filename": MACOS_FILENAME,
+            "content_type": "application/zip",
+            "missing": "macOS package is not uploaded",
+        }
+    if name == "windows":
+        return {
+            "kind": "windows",
+            "key": (os.environ.get("OSS_WINDOWS_KEY") or DEFAULT_WINDOWS_KEY).lstrip("/"),
+            "meta_key": (os.environ.get("OSS_WINDOWS_META_KEY") or DEFAULT_WINDOWS_META_KEY).lstrip("/"),
+            "filename": WINDOWS_FILENAME,
+            "content_type": "application/zip",
+            "missing": "Windows package is not uploaded",
+        }
+    raise OssError(f"unknown download kind: {kind}")
 
 
 def _utc_now() -> datetime:
@@ -202,6 +277,7 @@ def presign_get(
     *,
     expires: int = DEFAULT_EXPIRES,
     filename: str | None = None,
+    content_type: str | None = None,
     now: datetime | None = None,
     cfg: OssConfig | None = None,
 ) -> str:
@@ -211,7 +287,7 @@ def presign_get(
     extra: dict[str, str] = {}
     if filename:
         extra["response-content-disposition"] = f'attachment; filename="{filename}"'
-        extra["response-content-type"] = "application/vnd.android.package-archive"
+        extra["response-content-type"] = content_type or "application/octet-stream"
     uri, query, _headers = _sign_v4(
         method="GET",
         cfg=config,
@@ -554,18 +630,32 @@ def upload_apk(
     version_code: str = "",
     cfg: OssConfig | None = None,
 ) -> dict[str, Any]:
+    return upload_download("android", path, version=version, version_code=version_code, cfg=cfg)
+
+
+def upload_download(
+    kind: str,
+    path: str | Path,
+    *,
+    version: str = "",
+    version_code: str = "",
+    filename: str = "",
+    cfg: OssConfig | None = None,
+) -> dict[str, Any]:
     config = cfg or load_config()
     if config is None:
         raise OssError("OSS is not configured")
-    apk_path = Path(path)
-    if not apk_path.is_file():
-        raise OssError(f"APK not found: {apk_path}")
-    data = apk_path.read_bytes()
+    spec = _kind_spec(kind, config)
+    src = Path(path)
+    if not src.is_file():
+        raise OssError(f"package not found: {src}")
+    data = src.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     uploaded_at = _utc_now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    download_name = filename or spec["filename"]
     meta = {
         "sha256": digest,
-        "filename": DOWNLOAD_FILENAME,
+        "filename": download_name,
         "uploaded-at": uploaded_at,
     }
     if version:
@@ -573,14 +663,14 @@ def upload_apk(
     if version_code:
         meta["version-code"] = str(version_code)
     put_object(
-        config.apk_key,
+        spec["key"],
         data,
-        content_type="application/vnd.android.package-archive",
+        content_type=spec["content_type"],
         meta=meta,
         cfg=config,
     )
-    info = _apk_info(config.apk_key, len(data), digest, uploaded_at, version, version_code)
-    write_apk_manifest(info, cfg=config)
+    info = _package_info(spec["key"], download_name, len(data), digest, uploaded_at, version, version_code)
+    write_manifest(spec["meta_key"], info, cfg=config)
     return info
 
 
@@ -592,9 +682,21 @@ def _apk_info(
     version: str,
     version_code: str,
 ) -> dict[str, Any]:
+    return _package_info(key, DOWNLOAD_FILENAME, size, digest, uploaded_at, version, version_code)
+
+
+def _package_info(
+    key: str,
+    filename: str,
+    size: int,
+    digest: str,
+    uploaded_at: str,
+    version: str,
+    version_code: str,
+) -> dict[str, Any]:
     return {
         "key": key,
-        "filename": DOWNLOAD_FILENAME,
+        "filename": filename,
         "size": size,
         "sha256": digest,
         "uploaded_at": uploaded_at,
@@ -607,8 +709,15 @@ def write_apk_manifest(info: dict[str, Any], *, cfg: OssConfig | None = None) ->
     config = cfg or load_config()
     if config is None:
         raise OssError("OSS is not configured")
+    write_manifest(config.meta_key, info, cfg=config)
+
+
+def write_manifest(meta_key: str, info: dict[str, Any], *, cfg: OssConfig | None = None) -> None:
+    config = cfg or load_config()
+    if config is None:
+        raise OssError("OSS is not configured")
     put_object(
-        config.meta_key,
+        meta_key,
         json.dumps(info, ensure_ascii=False, indent=2).encode("utf-8"),
         content_type="application/json; charset=utf-8",
         cfg=config,
@@ -634,7 +743,7 @@ def apk_put_instructions(
     digest = hashlib.sha256(data).hexdigest()
     uploaded_at = _utc_now().strftime("%Y-%m-%dT%H:%M:%SZ")
     info = _apk_info(config.apk_key, len(data), digest, uploaded_at, version, version_code)
-    write_apk_manifest(info, cfg=config)
+    write_manifest(config.meta_key, info, cfg=config)
     url = presign_put(config.apk_key, expires=expires, cfg=config)
     return {
         **info,
@@ -645,27 +754,24 @@ def apk_put_instructions(
 
 
 def apk_download_payload(*, expires: int = DEFAULT_EXPIRES, cfg: OssConfig | None = None) -> dict[str, Any]:
+    return download_payload("android", expires=expires, cfg=cfg)
+
+
+def download_payload(kind: str, *, expires: int = DEFAULT_EXPIRES, cfg: OssConfig | None = None) -> dict[str, Any]:
     config = cfg or load_config()
     if config is None:
         raise OssError("OSS is not configured")
-    headers = head_object(config.apk_key, cfg=config)
-    if headers is None and config.apk_key.endswith(".bin"):
+    spec = _kind_spec(kind, config)
+    headers = head_object(spec["key"], cfg=config)
+    if headers is None and spec["kind"] == "android" and spec["key"].endswith(".bin"):
         # Older uploads used a .apk key; JD Cloud forbids that on the default domain.
         headers = head_object("downloads/remotedesk-android.apk", cfg=config)
         if headers is not None:
-            config = OssConfig(
-                access_key=config.access_key,
-                secret_key=config.secret_key,
-                endpoint=config.endpoint,
-                bucket=config.bucket,
-                region=config.region,
-                apk_key="downloads/remotedesk-android.apk",
-                meta_key=config.meta_key,
-            )
+            spec = {**spec, "key": "downloads/remotedesk-android.apk"}
     if headers is None:
-        raise OssError("android package is not uploaded")
+        raise OssError(spec["missing"])
     meta: dict[str, Any] = {}
-    raw_meta = get_object_text(config.meta_key, cfg=config)
+    raw_meta = get_object_text(spec["meta_key"], cfg=config)
     if raw_meta:
         try:
             parsed = json.loads(raw_meta)
@@ -673,8 +779,14 @@ def apk_download_payload(*, expires: int = DEFAULT_EXPIRES, cfg: OssConfig | Non
                 meta = parsed
         except json.JSONDecodeError:
             meta = {}
-    filename = str(meta.get("filename") or DOWNLOAD_FILENAME)
-    url = presign_get(config.apk_key, expires=expires, filename=filename, cfg=config)
+    filename = str(meta.get("filename") or spec["filename"])
+    url = presign_get(
+        spec["key"],
+        expires=expires,
+        filename=filename,
+        content_type=spec["content_type"],
+        cfg=config,
+    )
     size = meta.get("size")
     if size is None:
         try:
@@ -692,6 +804,29 @@ def apk_download_payload(*, expires: int = DEFAULT_EXPIRES, cfg: OssConfig | Non
         "sha256": meta.get("sha256"),
         "uploaded_at": meta.get("uploaded_at"),
     }
+
+
+def archive_for_upload(path: str | Path, dest_zip: str | Path) -> Path:
+    """Zip a .app / folder for OSS. Files are returned unchanged."""
+    src = Path(path)
+    if src.is_file():
+        return src
+    if not src.is_dir():
+        raise OssError(f"package not found: {src}")
+    dest = Path(dest_zip)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        dest.unlink()
+    if sys.platform == "darwin":
+        subprocess.check_call(["ditto", "-c", "-k", "--keepParent", str(src), str(dest)])
+        return dest
+    import zipfile
+
+    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for item in src.rglob("*"):
+            if item.is_file():
+                zf.write(item, item.relative_to(src.parent))
+    return dest
 
 
 def guess_content_type(path: Path) -> str:

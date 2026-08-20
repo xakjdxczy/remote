@@ -11,17 +11,29 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.content.pm.PackageManager
+import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        const val EXTRA_TAB = "tab"
+        const val TAB_REMOTE = "remote"
+        const val TAB_CAMERA = "camera"
+    }
 
     private lateinit var serverUrl: EditText
     private lateinit var statusView: TextView
@@ -30,6 +42,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var remoteId: EditText
     private lateinit var remotePass: EditText
     private lateinit var refreshSpinner: Spinner
+    private lateinit var tabRemote: TextView
+    private lateinit var tabCamera: TextView
+    private lateinit var panelRemote: ScrollView
+    private lateinit var panelCamera: ScrollView
+    private lateinit var camHost: EditText
+    private lateinit var camToken: EditText
+    private lateinit var camStatus: TextView
+    private lateinit var camUsb: RadioButton
+    private lateinit var camPairCard: LinearLayout
+    private lateinit var camModeHint: TextView
+    private var camFront = false
+    private var cameraTab = false
     private val main = Handler(Looper.getMainLooper())
     private var pendingAcceptId: String? = null
     private var pwTimer: Runnable? = null
@@ -60,6 +84,12 @@ class MainActivity : AppCompatActivity() {
     private val notifLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* proceed */ }
 
+    private val camPermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted.values.all { it }) startCameraLink() else camStatus.text = "需要相机和麦克风权限"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -83,10 +113,10 @@ class MainActivity : AppCompatActivity() {
         refreshSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
         refreshSpinner.setSelection(values.indexOf(DeviceStore.refreshSec(this)).coerceAtLeast(0))
 
+        bindTabs()
+        bindCamera()
+
         findViewById<Button>(R.id.btn_start).setOnClickListener { startProjection() }
-        findViewById<Button>(R.id.btn_camera).setOnClickListener {
-            startActivity(Intent(this, CameraLinkActivity::class.java))
-        }
         findViewById<Button>(R.id.btn_stop).setOnClickListener {
             stopService(Intent(this, ScreenCaptureService::class.java))
         }
@@ -118,6 +148,122 @@ class MainActivity : AppCompatActivity() {
         schedulePasswordRefresh()
         handleIncomingIntent(intent)
         render()
+    }
+
+    private fun bindTabs() {
+        tabRemote = findViewById(R.id.tab_remote)
+        tabCamera = findViewById(R.id.tab_camera)
+        panelRemote = findViewById(R.id.panel_remote)
+        panelCamera = findViewById(R.id.panel_camera)
+        tabRemote.setOnClickListener { showTab(false) }
+        tabCamera.setOnClickListener { showTab(true) }
+        showTab(false)
+    }
+
+    private fun showTab(camera: Boolean) {
+        cameraTab = camera
+        tabRemote.isSelected = !camera
+        tabCamera.isSelected = camera
+        panelRemote.visibility = if (camera) View.GONE else View.VISIBLE
+        panelCamera.visibility = if (camera) View.VISIBLE else View.GONE
+    }
+
+    private fun bindCamera() {
+        camHost = findViewById(R.id.cam_host)
+        camToken = findViewById(R.id.cam_token)
+        camStatus = findViewById(R.id.cam_status)
+        camUsb = findViewById(R.id.cam_usb)
+        camPairCard = findViewById(R.id.cam_pair_card)
+        camModeHint = findViewById(R.id.cam_mode_hint)
+        camHost.setText(DeviceStore.camHost(this))
+        findViewById<RadioButton>(R.id.cam_wifi).setOnCheckedChangeListener { _, on ->
+            if (on) {
+                if (camHost.text.toString().startsWith("127.0.0.1")) camHost.setText(DeviceStore.camHost(this))
+                renderCamTransport()
+            }
+        }
+        camUsb.setOnCheckedChangeListener { _, on ->
+            if (on) {
+                camHost.setText("127.0.0.1")
+                renderCamTransport()
+            }
+        }
+        renderCamTransport()
+        findViewById<Button>(R.id.cam_start).setOnClickListener { ensureCamPerms() }
+        findViewById<Button>(R.id.cam_stop).setOnClickListener {
+            stopService(Intent(this, CameraLinkService::class.java).setAction(CameraLinkService.ACTION_STOP))
+            HostState.set(status = "已停止摄像头模式")
+        }
+        findViewById<Button>(R.id.cam_switch).setOnClickListener {
+            camFront = !camFront
+            startService(Intent(this, CameraLinkService::class.java).setAction(CameraLinkService.ACTION_SWITCH))
+        }
+        findViewById<Button>(R.id.cam_mute).setOnClickListener {
+            startService(Intent(this, CameraLinkService::class.java).setAction(CameraLinkService.ACTION_MUTE))
+        }
+    }
+
+    private fun renderCamTransport() {
+        val usbOn = camUsb.isChecked
+        camPairCard.visibility = if (usbOn) View.GONE else View.VISIBLE
+        camModeHint.text = if (usbOn) {
+            "电脑点「准备 USB」后会自动配对，这里不用填地址和配对码。点下方开始即可。"
+        } else {
+            "填电脑局域网 IP 和配对码。USB 网络共享也走这里，填电脑在那条 USB 网上的 IP。"
+        }
+    }
+
+    private fun applyCamPair(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme != "dustcam") return
+        showTab(true)
+        val port = if (uri.port > 0) uri.port else 18790
+        val hostPart = uri.host ?: return
+        camHost.setText("$hostPart:$port")
+        val code = uri.path?.trim('/') ?: ""
+        if (code.isNotEmpty()) camToken.setText(code)
+        if (uri.getBooleanQueryParameter("usb", false)) {
+            camUsb.isChecked = true
+            camStatus.text = "电脑已配对，点开始即可"
+        } else {
+            camStatus.text = "已填入配对信息"
+        }
+        renderCamTransport()
+    }
+
+    private fun ensureCamPerms() {
+        val need = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            need.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        val missing = need.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) startCameraLink() else camPermLauncher.launch(missing.toTypedArray())
+    }
+
+    private fun startCameraLink() {
+        KeepAliveService.stop(this)
+        stopService(Intent(this, ScreenCaptureService::class.java))
+        val h = if (camUsb.isChecked) {
+            camHost.text.toString().trim().ifBlank { "127.0.0.1" }
+        } else {
+            camHost.text.toString().trim()
+        }
+        val t = camToken.text.toString().trim()
+        if (t.length != 6) {
+            camStatus.text = if (camUsb.isChecked) "请先在电脑点「准备 USB」" else "请填写电脑上的 6 位配对码"
+            return
+        }
+        if (!camUsb.isChecked) DeviceStore.setCamHost(this, h)
+        val svc = Intent(this, CameraLinkService::class.java)
+            .putExtra(CameraLinkService.EXTRA_HOST, h)
+            .putExtra(CameraLinkService.EXTRA_TOKEN, t)
+            .putExtra(CameraLinkService.EXTRA_USB, camUsb.isChecked)
+            .putExtra(CameraLinkService.EXTRA_FRONT, camFront)
+            .putExtra(CameraLinkService.EXTRA_HEIGHT, 720)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc) else startService(svc)
+        camStatus.text = "正在启动…"
     }
 
     private fun goOnline() {
@@ -234,7 +380,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
+        if (intent?.getStringExtra(EXTRA_TAB) == TAB_CAMERA || intent?.data?.scheme == "dustcam") {
+            showTab(true)
+        }
+        applyCamPair(intent)
         if (intent?.getBooleanExtra(KeepAliveService.EXTRA_INCOMING, false) == true) {
+            showTab(false)
             HostState.incoming?.let { showIncoming(it) }
         }
     }
@@ -271,6 +422,7 @@ class MainActivity : AppCompatActivity() {
             text = "远程操作(无障碍)：" + if (access) "已开启" else "未开启（点上方按钮开启才能被远程点击）"
             setTextColor(if (access) 0xFF22E6C8.toInt() else 0xFFFF6B8B.toInt())
         }
+        if (::camStatus.isInitialized) camStatus.text = HostState.status
     }
 
     override fun onNewIntent(intent: Intent) {

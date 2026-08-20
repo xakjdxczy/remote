@@ -11,3 +11,33 @@ services:
       OSS_BUCKET: ${OSS_BUCKET:-}
       OSS_REGION: ${OSS_REGION:-}
       OSS_APK_KEY: ${OSS_APK_KEY:-}
+      # Same credentials as the turn service. Empty TURN_URLS keeps STUN/P2P only.
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_USER: ${TURN_USER:-dustx}
+      TURN_PASS: ${TURN_PASS:-dustx-turn}
+      COTURN_LOG: /var/log/turnserver/turn.log
+
+  # Optional relay when ICE hole-punching fails (same role as Tailscale DERP).
+  # Set TURN_EXTERNAL_IP to the VPS public address and TURN_URLS on relay:
+  #   TURN_EXTERNAL_IP=x.x.x.x
+  #   TURN_URLS=turn:x.x.x.x:3478?transport=udp,turn:x.x.x.x:3478?transport=tcp
+  turn:
+    image: coturn/coturn:4.6.3
+    restart: unless-stopped
+    environment:
+      DETECT_EXTERNAL_IP: "yes"
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49152-49200:49152-49200/udp"
+    command:
+      - "-n"
+      - "--log-file=stdout"
+      - "--listening-port=3478"
+      - "--min-port=49152"
+      - "--max-port=49200"
+      - "--fingerprint"
+      - "--lt-cred-mech"
+      - "--user=${TURN_USER:-dustx}:${TURN_PASS:-dustx-turn}"
+      - "--realm=dustx"
+      - "--no-cli"

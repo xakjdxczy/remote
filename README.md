@@ -31,7 +31,8 @@
 - 会话内文字消息、实时网速/流量、延迟拆解（网络·缓冲·解码）/ FPS 显示
 - 无显示器时自动使用可交互的**演示桌面**
 - **跨平台被控端**：Windows / macOS / Linux 真机截屏 + 键鼠注入，Android 经 ADB 桥或**原生 App**远程控制
-- **手机当摄像头**：同一套尘埃X。电脑打开**桌面程序**（双击 `尘埃X.app` / `尘埃X.exe`），窗口里选「手机摄像头」；手机 App 选「作为摄像头」。Wi‑Fi 局域网或 USB 二选一。会议软件要点窗口里的「输出到系统摄像头 / 麦克风」（需 OBS 虚拟摄像头或 BlackHole / VB-CABLE）。
+- **手机当摄像头**：同一套尘埃X。电脑打开**桌面程序**（双击 `尘埃X.app` / `尘埃X.exe`），窗口里选「手机摄像头」；手机 App 选「作为摄像头」。Wi‑Fi 局域网或 USB 二选一。会议软件选「尘埃X 摄像头」（自己的虚拟摄像头，不用 OBS）。麦克风仍用 BlackHole / VB-CABLE。
+- **跨网互访**：两台都开着尘埃X，用互访识别码互加。可在设置里选 **应用层隧道**（本机 `127.0.0.1:端口` 转到对端，Mac 默认这项）或 **虚拟网卡**（Windows Wintun `100.x`；Mac 没有项目自己的 Network Extension 许可时选项不可用）。打洞失败走同一套 TURN。云端 / CLI 也可以走同一条打洞隧道，或走不占 P2P 的应用层协议（见下）。
 
 ## 跨平台被控端（backend）
 
@@ -94,9 +95,42 @@ export TURN_PASS="<secret>"
 python -m remote server
 ```
 
-### 官网安卓包（OSS）
+`docker-compose.yml` 里带了 coturn 服务。VPS 上把公网 IP 写进环境变量即可（和信令共用一套账号）：
 
-编译好的 APK 放到对象存储后，官网下载按钮会先请求信令服务器 `/api/downloads/android`，由服务器签发短时下载链接，再跳转到 OSS 下载（不把 AK/SK 暴露给浏览器）。
+```bash
+export TURN_EXTERNAL_IP="<VPS公网IP>"
+export TURN_URLS="turn:${TURN_EXTERNAL_IP}:3478?transport=udp,turn:${TURN_EXTERNAL_IP}:3478?transport=tcp"
+export TURN_USER="dustx"
+export TURN_PASS="<secret>"
+docker compose up --build -d
+```
+
+桌面端「跨网互访」会拉 `/api/config` 的 `ice_servers`（信令已允许本机页面跨域读取）。不设 `TURN_URLS` 时仍是纯 STUN/P2P。
+
+### 云端 / CLI 连 Windows（打洞 + 应用协议）
+
+Windows 尘埃X 互访页先点「上线」。两种方式都支持，不要把家里的 SSH/RDP 暴露到公网。
+
+**打洞**（和 Mac 互访同一条 WebRTC 数据通道；同时只能有一路 P2P）：
+
+```bash
+python -m remote mesh --device <识别码> --password <密码>
+ssh -p 2222 对端用户名@127.0.0.1
+```
+
+Mac 已经连着时，云端会收到 `device busy`。打洞失败走 VPS 上的 TURN。
+
+**纯应用协议**（经 VPS 信令转发 `list` / `read` / `write` / `exec`，不打洞、不占 P2P；文件默认限制在用户主目录）：
+
+```bash
+python -m remote agent --device <识别码> --password <密码> list
+python -m remote agent --device <识别码> --password <密码> read --path Desktop
+python -m remote agent --device <识别码> --password <密码> exec --command "whoami"
+```
+
+### 官网安装包（OSS）
+
+编译好的安卓包 / macOS 桌面程序 / Windows 桌面程序放到对象存储后，官网下载按钮会先请求信令服务器 `/api/downloads/<android|macos|windows>`，由服务器签发短时下载链接，再跳转到 OSS 下载（不把 AK/SK 暴露给浏览器）。
 
 ```bash
 export OSS_AK="<access-key>"
@@ -108,6 +142,8 @@ export OSS_BUCKET="<bucket>"
 # 上传编译产物（需本机能直连 OSS；云端构建机若被墙可改用 --presign-put）
 python -m remote upload-apk android/app/build/outputs/apk/debug/app-debug.apk \
   --version 1.8.1 --version-code 15
+python -m remote upload-download macos desktop/mac/尘埃X.app
+python -m remote upload-download windows desktop/windows/DustX
 
 # 只签发限时 PUT 链接，拿到能访问 OSS 的电脑上再用 curl -T 上传
 python -m remote upload-apk android/app/build/outputs/apk/debug/app-debug.apk \
@@ -119,8 +155,8 @@ python -m remote server
 
 官网静态页与信令同域时，Nginx 把 `/api/` 反代到信令即可。接口：
 
-- `GET /api/downloads/android` → JSON（`url` / `filename` / `version`）
-- `GET /api/downloads/android?redirect=1` → 302 到签名 URL
+- `GET /api/downloads/android|macos|windows` → JSON（`url` / `filename` / `version`）
+- `GET /api/downloads/<kind>?redirect=1` → 302 到签名 URL
 
 ## 快速开始
 
@@ -130,22 +166,19 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### 电脑桌面程序（Mac / Windows）
+### 电脑桌面程序（Mac / Windows，C++）
 
-用户双击 **尘埃X.app**（macOS）或 **尘埃X.exe**（Windows）即可，不需要安装或运行 Python。窗口里是远程控制 + 手机摄像头 / 虚拟设备。官网上的网页控制台只支持远程控制。
-
-开发机打一次包（源码不会进用户电脑）：
+用户双击 **尘埃X.app**（macOS）或 **DustX.exe**（Windows）即可，不需要安装或运行 Python。窗口是系统原生的（macOS AppKit + WKWebView，Windows Win32 + WebView2）：远程控制走官网控制台，手机摄像头走本机配对端口，跨网互访用现有公网信令打 WebRTC 数据通道。
 
 ```bash
-pip install -e ".[pack,host]"
-python -m remote pack
+cd desktop/cpp
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
 ```
 
-生成 `desktop/mac/尘埃X.app` 或 `desktop/windows/DustX/DustX.exe`。首次若被拦：右键 → 打开。
+macOS 产物：`desktop/cpp/build/尘埃X.app`。Windows 在 `windows-latest` 上编：Actions → Pack desktop → 下载 `DustX-windows`。首次若被拦：右键 → 打开。
 
-Windows 包在 GitHub Actions 的 `windows-latest` 上打：Actions → Pack desktop → 下载 `DustX-windows` 产物。也可在仓库页手动 Run workflow。
-
-源码调试仍可用 `python -m remote app`。
+远程控制页可用环境变量 `DUSTX_REMOTE_URL` 覆盖。
 
 ### 一键演示
 
@@ -171,14 +204,18 @@ python -m remote host --server ws://服务器IP:8080/ws
 
 | 命令 | 作用 |
 | --- | --- |
-| `python -m remote pack` | 打出 尘埃X.app / 尘埃X.exe（用户不跑 Python） |
-| `python -m remote app` | 源码调试：打开桌面窗口 |
+| `cd desktop/cpp && cmake -B build && cmake --build build` | 打出 C++ 尘埃X.app / DustX.exe（用户不跑 Python） |
+| `python -m remote pack` | 旧的 Python 打包（已不作为桌面产品） |
+| `python -m remote app` | 旧的 Python 窗口调试 |
 | `python -m remote server` | 信令 + 网页 UI |
 | `python -m remote host` | 被控端，打印识别码/密码（backend=auto） |
 | `python -m remote host --backend desktop` | 强制真机截屏（Win/macOS/Linux） |
 | `python -m remote host --backend android` | 经 ADB 控制安卓设备 |
 | `python -m remote demo` | 本地同时拉起信令和演示主机 |
 | `python -m remote upload-apk <apk>` | 把安卓包上传到 OSS，供官网下载 |
+| `python -m remote upload-download macos|windows|android <path>` | 把桌面/安卓包装进 OSS |
+| `python -m remote mesh --device --password` | 跨网互访打洞，本机 `2222` 转到对端 |
+| `python -m remote agent --device --password list\|read\|write\|exec` | 应用层协议，不占 P2P |
 
 ## 测试
 
@@ -186,11 +223,13 @@ python -m remote host --server ws://服务器IP:8080/ws
 pytest -q
 ```
 
-## Docker（仅信令）
+## Docker（信令 + 可选 TURN）
 
 ```bash
 docker compose up --build
 ```
+
+compose 会同时起信令和 coturn。客户端要真正走中继，还须给信令进程设置 `TURN_URLS` / `TURN_USER` / `TURN_PASS`（见上文「启用 TURN 中继」），否则 `ice_servers` 仍只有 STUN。
 
 ---
 

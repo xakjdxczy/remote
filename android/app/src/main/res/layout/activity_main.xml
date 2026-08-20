@@ -1,274 +1,97 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0B1022">
+    android:background="@color/bg"
+    android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="24dp">
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="16dp">
 
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:text="尘埃X"
-            android:textColor="#EAF0FF"
+            android:textColor="@color/text"
             android:textSize="24sp"
             android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="切到后台也会保持在线。请允许忽略电池优化，避免系统杀掉连接。"
-            android:textColor="#9AA6C4"
-            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/app_version"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
+            android:background="@drawable/bg_chip"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="5dp"
             android:text="版本 --"
-            android:textColor="#5B8CFF"
-            android:textSize="12sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="信令服务器"
-            android:textColor="#9AA6C4"
-            android:textSize="12sp" />
-
-        <EditText
-            android:id="@+id/server_url"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:background="#141B34"
-            android:padding="12dp"
-            android:text="wss://117.72.108.246/ws"
-            android:textColor="#EAF0FF"
-            android:textColorHint="#63708F"
-            android:inputType="textUri" />
-
-        <Button
-            android:id="@+id/btn_start"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:backgroundTint="#5B8CFF"
-            android:text="开始被控（授权录屏）"
-            android:textColor="#FFFFFF" />
-
-        <Button
-            android:id="@+id/btn_camera"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:backgroundTint="#22E6C8"
-            android:text="作为摄像头（连旁边的电脑）"
-            android:textColor="#0B1022" />
-
-        <Button
-            android:id="@+id/btn_stop"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:backgroundTint="#2A3352"
-            android:text="停止共享屏幕"
-            android:textColor="#EAF0FF" />
-
-        <Button
-            android:id="@+id/btn_offline"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:backgroundTint="#8B3A4A"
-            android:text="下线（断开信令）"
-            android:textColor="#FFFFFF" />
-
-        <Button
-            android:id="@+id/btn_battery"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:backgroundTint="#2A3352"
-            android:text="允许后台运行（忽略电池优化）"
-            android:textColor="#EAF0FF" />
-
-        <Button
-            android:id="@+id/btn_accessibility"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:backgroundTint="#2A3352"
-            android:text="开启无障碍（允许远程点击/滑动）"
-            android:textColor="#EAF0FF" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="控制其他设备"
-            android:textColor="#9AA6C4"
-            android:textSize="12sp" />
-        <EditText
-            android:id="@+id/remote_id"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:background="#141B34"
-            android:hint="对方远程码"
-            android:inputType="number"
-            android:padding="12dp"
-            android:textColor="#EAF0FF"
-            android:textColorHint="#63708F" />
-        <EditText
-            android:id="@+id/remote_pass"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:background="#141B34"
-            android:hint="对方密码"
-            android:inputType="textPassword"
-            android:padding="12dp"
-            android:textColor="#EAF0FF"
-            android:textColorHint="#63708F" />
-        <Button
-            android:id="@+id/btn_connect"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:backgroundTint="#22E6C8"
-            android:text="连接对方"
-            android:textColor="#0B1022" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:background="#141B34"
-            android:orientation="vertical"
-            android:padding="18dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="状态"
-                android:textColor="#9AA6C4"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/status"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="未连接"
-                android:textColor="#22E6C8"
-                android:textSize="16sp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:text="识别码"
-                android:textColor="#9AA6C4"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/device_id"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="— — —"
-                android:textColor="#EAF0FF"
-                android:textSize="28sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.15" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="连接密码（默认不自动刷新）"
-                android:textColor="#9AA6C4"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/password"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="——————"
-                android:textColor="#FFD15C"
-                android:textSize="22sp"
-                android:textStyle="bold" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginTop="14dp"
-                android:background="#22314F" />
-
-            <Button
-                android:id="@+id/btn_refresh_pw"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:backgroundTint="#2A3352"
-                android:text="手动刷新密码"
-                android:textColor="#EAF0FF" />
-            <Spinner
-                android:id="@+id/pw_refresh"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp" />
-
-            <TextView android:id="@+id/stat_method"
-                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="12dp" android:text="连接方式：--"
-                android:textColor="#22E6C8" android:textSize="14sp" />
-            <TextView android:id="@+id/stat_peer"
-                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="6dp" android:text="对方远程码：--"
-                android:textColor="#FFD15C" android:textSize="14sp" />
-            <TextView android:id="@+id/stat_codec"
-                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="6dp" android:text="编解码：--"
-                android:textColor="#EAF0FF" android:textSize="14sp" />
-            <TextView android:id="@+id/stat_proto"
-                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="6dp" android:text="传输：--"
-                android:textColor="#EAF0FF" android:textSize="14sp" />
-            <TextView android:id="@+id/stat_speed"
-                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="6dp" android:text="实时网速：--"
-                android:textColor="#EAF0FF" android:textSize="14sp" />
-            <TextView android:id="@+id/stat_session"
-                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="6dp" android:text="本次流量：0 B"
-                android:textColor="#EAF0FF" android:textSize="14sp" />
-            <TextView android:id="@+id/stat_total"
-                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="6dp" android:text="历史流量：0 B"
-                android:textColor="#EAF0FF" android:textSize="14sp" />
-            <TextView android:id="@+id/stat_latency"
-                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="6dp" android:text="延迟：-- ms"
-                android:textColor="#FFD15C" android:textSize="14sp" />
-            <TextView android:id="@+id/stat_access"
-                android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginTop="6dp" android:text="远程操作(无障碍)：未开启"
-                android:textColor="#FF6B8B" android:textSize="14sp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:text="在电脑/手机浏览器打开控制端网页，输入以上识别码与密码即可远程控制本机。画面走 WebRTC 视频编码(H.264/VP8)，30fps，540p 自适应低延迟。"
-                android:textColor="#63708F"
-                android:textSize="12sp" />
-        </LinearLayout>
+            android:textColor="@color/accent"
+            android:textSize="11sp" />
     </LinearLayout>
-</ScrollView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_tab_bar"
+        android:orientation="horizontal"
+        android:padding="3dp">
+
+        <TextView
+            android:id="@+id/tab_remote"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/bg_tab"
+            android:gravity="center"
+            android:text="远程"
+            android:textColor="@color/tab_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tab_camera"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/bg_tab"
+            android:gravity="center"
+            android:text="作为摄像头"
+            android:textColor="@color/tab_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <ScrollView
+            android:id="@+id/panel_remote"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
+
+            <include layout="@layout/tab_remote" />
+        </ScrollView>
+
+        <ScrollView
+            android:id="@+id/panel_camera"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <include layout="@layout/tab_camera" />
+        </ScrollView>
+    </FrameLayout>
+</LinearLayout>

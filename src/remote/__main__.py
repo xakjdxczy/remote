@@ -8,7 +8,9 @@ import logging
 import os
 import sys
 import threading
+import tempfile
 import time
+from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -49,6 +51,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_upload.add_argument("--expires", type=int, default=7200, help="presigned PUT lifetime in seconds")
 
+    p_dl = sub.add_parser("upload-download", help="upload a desktop/android package to OSS")
+    p_dl.add_argument("kind", choices=["android", "macos", "windows"])
+    p_dl.add_argument("path", help="file, .app, or unpacked folder")
+    p_dl.add_argument("--version", default="")
+    p_dl.add_argument("--version-code", default="", dest="version_code")
+
     p_app = sub.add_parser("app", help="open the DustX desktop window (macOS / Windows)")
     p_app.add_argument("--host", default="0.0.0.0")
     p_app.add_argument("--port", type=int, default=8080)
@@ -58,6 +66,26 @@ def main(argv: list[str] | None = None) -> None:
     p_cam.add_argument("--token", required=True)
 
     sub.add_parser("pack", help="build 尘埃X.app / 尘埃X.exe (user does not run Python)")
+
+    p_mesh = sub.add_parser("mesh", help="跨网互访打洞：WebRTC 隧道 + 本机端口转发")
+    p_mesh.add_argument("--server", default=os.environ.get("REMOTEDESK_SERVER") or "")
+    p_mesh.add_argument("--device", required=True)
+    p_mesh.add_argument("--password", required=True)
+    p_mesh.add_argument("--listen", type=int, default=2222)
+    p_mesh.add_argument("--bind", default="127.0.0.1")
+    p_mesh.add_argument("--service-port", type=int, default=22)
+    p_mesh.add_argument("--name", default="")
+
+    p_agent = sub.add_parser("agent", help="应用层协议：经 VPS 对对端 list/read/write/exec（不占 P2P）")
+    p_agent.add_argument("--server", default=os.environ.get("REMOTEDESK_HTTP") or "")
+    p_agent.add_argument("--device", required=True)
+    p_agent.add_argument("--password", required=True)
+    p_agent.add_argument("op", choices=["list", "read", "write", "exec"])
+    p_agent.add_argument("--path", default="")
+    p_agent.add_argument("--content", default="")
+    p_agent.add_argument("--cwd", default="")
+    p_agent.add_argument("--command", default="")
+    p_agent.add_argument("extra", nargs=argparse.REMAINDER)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -88,6 +116,8 @@ def main(argv: list[str] | None = None) -> None:
         _run_demo(args.host, args.port, args.fps)
     elif args.cmd == "upload-apk":
         _upload_apk(args.apk, args.version, args.version_code, args.presign_put, args.expires)
+    elif args.cmd == "upload-download":
+        _upload_download(args.kind, args.path, args.version, args.version_code)
     elif args.cmd == "cam-sink":
         from remote.cam_sink import main as cam_sink_main
 
@@ -96,6 +126,39 @@ def main(argv: list[str] | None = None) -> None:
         from remote.pack import main as pack_main
 
         pack_main()
+    elif args.cmd == "mesh":
+        from remote.mesh_client import main as mesh_main
+        from remote.urls import official_ws
+
+        mesh_argv = [
+            "--server", args.server or official_ws(),
+            "--device", args.device,
+            "--password", args.password,
+            "--listen", str(args.listen),
+            "--bind", args.bind,
+            "--service-port", str(args.service_port),
+        ]
+        if args.name:
+            mesh_argv += ["--name", args.name]
+        raise SystemExit(mesh_main(mesh_argv))
+    elif args.cmd == "agent":
+        from remote.agent_cli import main as agent_main
+        from remote.urls import official_http
+
+        agent_argv = [
+            "--server", args.server or official_http(),
+            "--device", args.device,
+            "--password", args.password,
+            args.op,
+            "--path", args.path,
+            "--content", args.content,
+            "--cwd", args.cwd,
+        ]
+        if args.command:
+            agent_argv += ["--command", args.command]
+        if args.extra:
+            agent_argv += args.extra
+        raise SystemExit(agent_main(agent_argv))
 
 
 def _run_server(host: str, port: int) -> None:
@@ -150,6 +213,27 @@ def _upload_apk(apk: str, version: str, version_code: str, presign_put: bool, ex
     )
     if info.get("version"):
         print(f"版本 {info['version']} ({info.get('version_code') or '-'})", flush=True)
+
+
+def _upload_download(kind: str, path: str, version: str, version_code: str) -> None:
+    from remote.server.oss import MACOS_FILENAME, WINDOWS_FILENAME, archive_for_upload, upload_download
+
+    names = {"macos": MACOS_FILENAME, "windows": WINDOWS_FILENAME, "android": "remotedesk-android.apk"}
+    src = Path(path)
+    staged = Path(tempfile.gettempdir()) / names.get(kind, src.name)
+    packaged = archive_for_upload(src, staged)
+    ephemeral = packaged != src
+    try:
+        info = upload_download(kind, packaged, version=version, version_code=version_code)
+    finally:
+        if ephemeral:
+            packaged.unlink(missing_ok=True)
+    print(
+        f"已上传 {info['filename']}  ({info['size']} bytes, sha256={info['sha256'][:12]}…)",
+        flush=True,
+    )
+    if info.get("version"):
+        print(f"版本 {info['version']}", flush=True)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,19 @@
+---
+description: Operate Mac, Windows, and JD VPS from this local Cursor session via SSH
+alwaysApply: true
+---
+
+# Multi-host from this Mac session
+
+This chat is the control plane. Do **not** open Cursor Remote-SSH windows (or install Cursor Server) just to run commands on other machines. Remote-SSH is only if the user wants Windows as a full IDE workspace.
+
+| Host | How |
+|---|---|
+| Mac | This workspace; run commands locally |
+| Windows | `ssh dustx-windows` (`127.0.0.1:2222`). DustX mesh must stay connected. Do not ask the user to type on the PC |
+| JD VPS | `ssh dustx-vps` (`root@117.72.108.246`). Key is `~/.ssh/id_ed25519_dustx_vps` (from `.env/config.ini`). Never print or commit that key |
+| Future Linux | Add a `Host` in `~/.ssh/config` the same way, then `ssh` that alias |
+
+If Windows SSH asks for a password, use a one-time local dialog / `SSH_ASKPASS`; do not paste passwords into chat. Prefer installing this Mac’s public key on the remote `authorized_keys` when the user wants passwordless access.
+
+Never quote `.env/config.ini` values (OSS, SSH key, passwords).

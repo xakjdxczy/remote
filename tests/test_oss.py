@@ -1,6 +1,16 @@
 from datetime import datetime, timezone
 
-from remote.server.oss import OssConfig, OssError, _xml_text, load_config, presign_get, presign_put
+from remote.server.oss import (
+    MACOS_FILENAME,
+    WINDOWS_FILENAME,
+    OssConfig,
+    OssError,
+    _kind_spec,
+    _xml_text,
+    load_config,
+    presign_get,
+    presign_put,
+)
 
 
 AWS_EXAMPLE = OssConfig(
@@ -12,16 +22,20 @@ AWS_EXAMPLE = OssConfig(
 )
 
 
-def test_load_config_requires_all_fields(monkeypatch):
+def test_load_config_requires_all_fields(monkeypatch, tmp_path):
     monkeypatch.delenv("OSS_AK", raising=False)
     monkeypatch.delenv("OSS_SK", raising=False)
     monkeypatch.delenv("OSS_ENDPOINT", raising=False)
     monkeypatch.delenv("OSS_BUCKET", raising=False)
+    monkeypatch.setenv("DUSTX_OSS_CONFIG", str(tmp_path / "missing.ini"))
     assert load_config() is None
-    monkeypatch.setenv("OSS_AK", "JDC_TEST")
-    monkeypatch.setenv("OSS_SK", "secret")
-    monkeypatch.setenv("OSS_ENDPOINT", "https://s3.example-region.example-oss.com")
-    monkeypatch.setenv("OSS_BUCKET", "demo-bucket")
+    ini = tmp_path / "config.ini"
+    ini.write_text(
+        "OSS_AK=JDC_TEST\nOSS_SK=secret\nOSS_ENDPOINT=https://s3.example-region.example-oss.com\n"
+        "OSS_BUCKET=demo-bucket\nSSH_PRIVATE_KEY=ignore\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DUSTX_OSS_CONFIG", str(ini))
     cfg = load_config()
     assert cfg is not None
     assert cfg.endpoint == "s3.example-region.example-oss.com"
@@ -67,6 +81,20 @@ def test_presign_put_is_sigv4_query():
     assert "X-Amz-Algorithm=AWS4-HMAC-SHA256" in url
     assert "X-Amz-Expires=7200" in url
     assert "X-Amz-Signature=" in url
+
+
+def test_kind_spec_desktop_keys():
+    spec = _kind_spec("macos", AWS_EXAMPLE)
+    assert spec["filename"] == MACOS_FILENAME
+    assert spec["key"].endswith("macos.bin")
+    win = _kind_spec("windows", AWS_EXAMPLE)
+    assert win["filename"] == WINDOWS_FILENAME
+    try:
+        _kind_spec("nope", AWS_EXAMPLE)
+    except OssError as exc:
+        assert "unknown" in str(exc)
+    else:
+        raise AssertionError("expected OssError")
 
 
 def test_presign_includes_attachment_filename():

@@ -23,13 +23,16 @@
 cd android
 # 配置 SDK 路径（或设置 ANDROID_HOME）
 echo "sdk.dir=/path/to/android-sdk" > local.properties
-gradle :app:assembleDebug        # 或 ./gradlew（先 gradle wrapper 生成 wrapper）
-# 产物：app/build/outputs/apk/debug/app-debug.apk
+# 正式包（用本机 keystore 签名，覆盖安装必须是同一证书）
+./gradlew :app:assembleRelease
+# 产物：app/build/outputs/apk/release/app-release.apk
 
 # 上传到 OSS 后，官网通过 /api/downloads/android 取签名链接下载
-python -m remote upload-apk app/build/outputs/apk/debug/app-debug.apk \
-  --version 1.8.1 --version-code 15
+python -m remote upload-apk app/build/outputs/apk/release/app-release.apk \
+  --version 1.9.0 --version-code 16
 ```
+
+签名配置在本机 `keystore.properties`（不要提交）。没有这份文件时，release 不会带正式证书。已经用 debug 包装过的手机，换成正式签名后需要先卸载再装。
 
 ## 权限说明
 
@@ -43,7 +46,7 @@ python -m remote upload-apk app/build/outputs/apk/debug/app-debug.apk \
 - 版本在 `app/build.gradle.kts` 的 `versionName`(展示,如 `1.1.0`)与 `versionCode`(整数,每次发布 +1)。
 - App 首页会显示 `版本 v<versionName> (<versionCode>)`,方便确认装的是哪一版。
 - **约定:每次发布 APK 前都递增 `versionCode`(+1)并更新 `versionName`。**
-- 当前:`1.9.0 (16)`。首页「作为摄像头」可把本机相机/麦克风送给旁边电脑（Wi‑Fi 或 USB 二选一）。
+- 当前:`1.9.6 (22)`。首页顶部分栏切换「远程」和「作为摄像头」。官网包用正式证书签名。
 
 ## 说明
 

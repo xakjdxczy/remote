@@ -270,11 +270,29 @@ class HostAgent:
             elif kind == "signal":
                 if self._peer:
                     await self._peer.handle_signal(msg)
+            elif kind == "agent":
+                await self._on_agent(ws, msg)
             elif kind == "password":
                 self.password = msg.get("temp_password")
                 if self.device_id and self.password:
                     save_device_config({"device_id": self.device_id, "temp_password": self.password})
                     print_banner(self.device_id, self.password, self.server, self.source.backend_name())
+
+    async def _on_agent(self, ws, msg: dict) -> None:
+        from remote.agent_ops import run_agent
+
+        op = str(msg.get("op") or "")
+        print(f"  [agent] {op} {msg.get('path') or ''}".rstrip(), flush=True)
+        result = await asyncio.to_thread(
+            run_agent,
+            op,
+            path=str(msg.get("path") or ""),
+            content=str(msg.get("content") or ""),
+            command=str(msg.get("command") or ""),
+            cwd=str(msg.get("cwd") or ""),
+        )
+        payload = {"type": "agent_result", "id": msg.get("id"), **result}
+        await self._send(ws, encode_json(payload))
 
     async def _on_incoming(self, ws, msg: dict) -> None:
         peer = msg.get("viewer_id_display") or msg.get("viewer_id") or msg.get("viewer_name") or "?"
