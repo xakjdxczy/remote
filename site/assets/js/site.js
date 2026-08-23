@@ -81,14 +81,37 @@
   tick();
 })();
 
-// Official-site downloads: ask the signaling server for a short-lived OSS URL.
+// Official-site downloads: show each package version, then ask for a short-lived OSS URL.
 (function () {
+  const labels = {
+    macos: "⬇ macOS 桌面程序",
+    windows: "⬇ Windows 桌面程序",
+    android: "⬇ 安卓被控端 APK",
+  };
+
+  function paintVersion(kind, version, link) {
+    if (link && version) link.dataset.version = version;
+    const shown = version || (link && link.dataset.version) || "";
+    const el = document.querySelector(`[data-ver="${kind}"]`);
+    if (el) el.textContent = shown ? `版本 ${shown}` : "版本暂无";
+    if (link) {
+      const base = labels[kind] || link.dataset.label || link.textContent;
+      link.dataset.label = base;
+      link.textContent = shown ? `${base} · ${shown}` : base;
+    }
+  }
+
   document.querySelectorAll("[data-download]").forEach((link) => {
+    const kind = link.dataset.download;
+    if (!kind) return;
+    fetch(`/api/downloads/${kind}`, { headers: { Accept: "application/json" } })
+      .then((res) => res.json())
+      .then((data) => paintVersion(kind, data && data.ok ? data.version : "", link))
+      .catch(() => paintVersion(kind, "", link));
+
     link.addEventListener("click", async (event) => {
       event.preventDefault();
       if (link.dataset.busy === "1") return;
-      const kind = link.dataset.download;
-      const original = link.textContent;
       link.dataset.busy = "1";
       link.classList.add("is-busy");
       link.textContent = "正在获取下载链接…";
@@ -100,6 +123,7 @@
         if (!res.ok || !data.url) {
           throw new Error(data.message || "获取下载链接失败");
         }
+        paintVersion(kind, data.version || "", link);
         const a = document.createElement("a");
         a.href = data.url;
         a.rel = "noopener";
@@ -108,13 +132,15 @@
         a.click();
         a.remove();
       } catch (err) {
-        link.textContent = original;
+        paintVersion(kind, link.dataset.version || "", link);
         window.alert(err instanceof Error ? err.message : "下载失败，请稍后重试");
         return;
       } finally {
         link.dataset.busy = "0";
         link.classList.remove("is-busy");
-        link.textContent = original;
+        if (link.textContent === "正在获取下载链接…") {
+          paintVersion(kind, link.dataset.version || "", link);
+        }
       }
     });
   });

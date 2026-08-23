@@ -152,12 +152,12 @@ std::string json_get_string(const std::string& json, const std::string& key) {
   }
 }
 
-int json_get_int(const std::string& json, const std::string& key, int fallback) {
+long long json_get_ll(const std::string& json, const std::string& key, long long fallback) {
   const std::string pat = "\"" + key + "\"";
   size_t pos = json.find(pat);
   if (pos == std::string::npos) return fallback;
   size_t i = pos + pat.size();
-  while (i < json.size() && (json[i] == ' ' || json[i] == '\t' || json[i] == ':')) ++i;
+  while (i < json.size() && (json[i] == ' ' || json[i] == '\t' || json[i] == '\n' || json[i] == '\r' || json[i] == ':')) ++i;
   if (i < json.size() && json[i] == '"') ++i;
   bool neg = false;
   if (i < json.size() && json[i] == '-') {
@@ -165,9 +165,54 @@ int json_get_int(const std::string& json, const std::string& key, int fallback) 
     ++i;
   }
   if (i >= json.size() || json[i] < '0' || json[i] > '9') return fallback;
-  int v = 0;
+  long long v = 0;
   while (i < json.size() && json[i] >= '0' && json[i] <= '9') v = v * 10 + (json[i++] - '0');
   return neg ? -v : v;
+}
+
+int json_get_int(const std::string& json, const std::string& key, int fallback) {
+  return static_cast<int>(json_get_ll(json, key, fallback));
+}
+
+bool json_get_bool(const std::string& json, const std::string& key, bool fallback) {
+  const std::string pat = "\"" + key + "\"";
+  size_t pos = json.find(pat);
+  if (pos == std::string::npos) return fallback;
+  size_t i = pos + pat.size();
+  while (i < json.size() && (json[i] == ' ' || json[i] == '\t' || json[i] == '\n' || json[i] == '\r' || json[i] == ':')) ++i;
+  if (json.compare(i, 4, "true") == 0) return true;
+  if (json.compare(i, 5, "false") == 0) return false;
+  return fallback;
+}
+
+std::string base64_encode(const std::string& data) {
+  return b64(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+}
+
+std::string base64_decode(const std::string& data) {
+  auto val = [](unsigned char c) -> int {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+  };
+  std::string out;
+  int acc = 0;
+  int bits = -8;
+  for (unsigned char c : data) {
+    if (c == '=' || c == '\n' || c == '\r' || c == ' ') continue;
+    const int d = val(c);
+    if (d < 0) continue;
+    acc = (acc << 6) + d;
+    bits += 6;
+    if (bits >= 0) {
+      out.push_back(static_cast<char>((acc >> bits) & 0xff));
+      bits -= 8;
+    }
+  }
+  return out;
 }
 
 std::string signaling_http_origin() {

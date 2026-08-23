@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>尘埃X</title>
+  <link rel="stylesheet" href="/shell.css" />
+</head>
+<body>
+  <aside class="nav">
+    <div class="brand">
+      <div class="logo">尘</div>
+      <div>
+        <div class="brand-name">尘埃X</div>
+        <div class="brand-sub">一套远程码，功能一起用</div>
+        <div class="brand-ver" id="me-ver">版本 …</div>
+      </div>
+    </div>
+    <div class="me">
+      <div class="me-kicker">本机远程码</div>
+      <div class="me-row">
+        <strong id="me-id">------</strong>
+        <button type="button" class="me-btn" id="me-copy-id">复制</button>
+      </div>
+      <div class="me-kicker">临时密码</div>
+      <div class="me-row">
+        <strong id="me-pass" class="secret-text">••••••••</strong>
+        <button type="button" class="peek" id="me-peek" title="点击查看或隐藏">查看</button>
+        <button type="button" class="me-btn" id="me-refresh">刷新</button>
+      </div>
+    </div>
+    <button type="button" class="nav-btn is-on" data-panel="home">
+      <span class="nav-title">概览</span>
+      <span class="nav-desc">一套识别码 · 当前状态</span>
+    </button>
+    <button type="button" class="nav-btn" data-panel="remote" hidden>
+      <span class="dot" data-dot="remote"></span>
+      <span class="nav-title">远程控制</span>
+      <span class="nav-meta" data-meta="remote">单独窗口 · 多标签</span>
+    </button>
+    <button type="button" class="nav-btn" data-panel="mesh" hidden>
+      <span class="dot" data-dot="mesh"></span>
+      <span class="nav-title">跨网互访</span>
+      <span class="nav-meta" data-meta="mesh">主窗口标签</span>
+    </button>
+    <button type="button" class="nav-btn" data-panel="cam">
+      <span class="dot" data-dot="cam"></span>
+      <span class="nav-title">手机摄像头</span>
+      <span class="nav-meta" data-meta="cam">本机预览</span>
+    </button>
+    <label class="proxy-toggle" title="关掉后，界面和信令直连，不走 Clash 系统代理 / 全局模式。TUN 增强模式仍可能劫持 UDP。">
+      <input type="checkbox" id="use-system-proxy" />
+      <span>走系统代理</span>
+    </label>
+    <p class="nav-foot">切页不会断开已有连接。看屏幕、文件、终端、摄像头和互访都用左侧这套码。</p>
+  </aside>
+  <main class="stage">
+    <section id="panel-home" class="home is-on">
+      <header class="home-top">
+        <h1>这台电脑</h1>
+        <p>先连接并记住设备。远程控制在单独窗口里开；互访只用左侧标签。关远程标签才断开屏幕。</p>
+      </header>
+      <div class="desk">
+        <aside class="devices">
+          <div class="devices-head">
+            <h2>我的设备 <span id="device-count"></span></h2>
+            <div class="add-device">
+              <input id="add-id" placeholder="对方远程码" autocomplete="off" />
+              <input id="add-pass" type="password" placeholder="密码" autocomplete="new-password" />
+              <button type="button" id="add-go">连接</button>
+            </div>
+          </div>
+          <div id="device-list" class="device-list"></div>
+        </aside>
+        <section class="tools">
+          <div class="tools-head">
+            <h2 id="tool-title">基础连接</h2>
+            <p id="tool-sub">先在左边选一台设备</p>
+            <div id="link-rail" class="link-rail" hidden></div>
+            <div id="pair-box" class="pair-box" hidden>
+              <input id="pair-pass" type="password" placeholder="对方当前密码" autocomplete="new-password" />
+              <button type="button" id="pair-go">连接</button>
+              <button type="button" id="pair-off">取消连接</button>
+            </div>
+          </div>
+          <div class="tool-grid" id="tool-grid">
+            <button type="button" class="tool" data-tool="remote" disabled>
+              <span class="tool-ico t-blue">🖥</span>
+              <span>远程控制</span>
+            </button>
+            <button type="button" class="tool" data-tool="files" disabled>
+              <span class="tool-ico t-blue">📁</span>
+              <span>文件传输</span>
+            </button>
+            <button type="button" class="tool" data-tool="term" disabled>
+              <span class="tool-ico t-blue">⌘</span>
+              <span>终端</span>
+            </button>
+            <button type="button" class="tool" data-tool="camera" disabled>
+              <span class="tool-ico t-cyan">📷</span>
+              <span>摄像头</span>
+            </button>
+            <button type="button" class="tool" data-tool="center" disabled>
+              <span class="tool-ico t-yellow">🗂</span>
+              <span>文件中心</span>
+            </button>
+            <button type="button" class="tool" data-tool="mesh" disabled>
+              <span class="tool-ico t-blue">🔗</span>
+              <span>跨网互访</span>
+            </button>
+          </div>
+          <section class="specs" id="device-specs"></section>
+          <p class="tool-note" id="tool-note"></p>
+        </section>
+      </div>
+    </section>
+    <iframe id="frame-remote" class="panel" title="远程控制" allow="display-capture; camera; microphone; clipboard-read; clipboard-write; autoplay"></iframe>
+    <iframe id="frame-mesh" class="panel" src="/mesh.html" title="跨网互访"></iframe>
+    <iframe id="frame-cam" class="panel" src="/cam.html" title="手机摄像头" allow="camera; microphone; autoplay"></iframe>
+    <div id="banner" class="banner" hidden></div>
+    <div id="update-bar" class="update-bar" hidden>
+      <div class="update-copy">
+        <strong id="update-title">发现新版本</strong>
+        <p id="update-text"></p>
+      </div>
+      <div class="update-actions">
+        <button type="button" id="update-later">稍后</button>
+        <button type="button" class="primary" id="update-now">立即更新</button>
+      </div>
+    </div>
+  </main>
+  <script src="/ui.js?v=peek8"></script>
+  <script src="/recents.js?v=pair1"></script>
+  <script src="/shell.js?v=pair1"></script>
+</body>
+</html>

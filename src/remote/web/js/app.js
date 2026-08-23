@@ -1,4 +1,5 @@
 import { bindCamUi } from "./cam.js";
+import { forgetRecent, formatRecentLive, formatRecentRecord, loadRecents, setRecentWant, upsertRecent } from "./recents.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -37,6 +38,18 @@ const state = {
   displayStream: null,
   pwTimer: null,
   registered: false,
+  wantRemote: false,
+  remoteRetry: 0,
+  remoteRetryTimer: 0,
+  lastTarget: null,
+  sessionStartedAt: 0,
+  sessionPeerId: "",
+  toolMode: "",
+  viewerOnly: false,
+  shareCamera: false,
+  sessionId: "",
+  pairToken: "",
+  fromId: "",
 };
 
 // Chrome treats jitterBufferTarget=0 as "unset" on some versions and then
@@ -186,7 +199,20 @@ function fmtSpeed(bytesPerSec) {
   return `${(bits / 1e6).toFixed(2)} Mbps`;
 }
 
+async function hydrateSignals() {
+  try {
+    const app = await (await fetch("/api/app")).json();
+    if (app.signal_http) window.DUSTX_SIGNAL_HTTP = app.signal_http;
+    if (app.signal_ws) window.DUSTX_SIGNAL_WS = app.signal_ws;
+  } catch { /* official site */ }
+}
+
+function signalHttp() {
+  return String(window.DUSTX_SIGNAL_HTTP || "").replace(/\/$/, "");
+}
+
 function wsUrl() {
+  if (window.DUSTX_SIGNAL_WS) return String(window.DUSTX_SIGNAL_WS);
   const proto = location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${location.host}/ws`;
 }
@@ -200,10 +226,70 @@ function showView(name) {
   });
 }
 
+function isEmbedded() {
+  try {
+    return new URLSearchParams(location.search).get("embed") === "1" || window.parent !== window;
+  } catch {
+    return true;
+  }
+}
+
+function usesParentSignal() {
+  return isEmbedded() && !state.viewerOnly && window.parent !== window;
+}
+
+function applyEmbedChrome() {
+  if (!isEmbedded()) return;
+  document.documentElement.classList.add("embed");
+  document.body?.classList.add("embed");
+}
+
+function remoteTone(text, cls) {
+  const s = String(text || "");
+  if (/失败|断开|错误|顶掉/.test(s)) return "err";
+  if (/来电|等待对方同意/.test(s)) return "warn";
+  if (/正在控制|正在被控制|正在共享|已连接|P2P|TURN/.test(s)) return "live";
+  if (/正在|呼叫|建立|打开|连接…|等待/.test(s)) return "progress";
+  const c = String(cls || "");
+  if (c.includes("busy")) return "progress";
+  return c.replace("pill", "").trim();
+}
+
+function notifyShell(extra) {
+  if (!isEmbedded()) return;
+  const pill = $("status-pill");
+  try {
+    const password = ($("local-pass") && $("local-pass")._getSecret && $("local-pass")._getSecret()) || state.password || "";
+    const status = pill ? pill.textContent : "";
+    const cls = pill ? String(pill.className).replace("pill", "").trim() : "";
+    const peerId = String(state.sessionPeerId || state.lastTarget?.id || "").replace(/\D/g, "");
+    const payload = {
+      source: "dustx",
+      channel: "remote",
+      status,
+      cls: remoteTone(status, cls) || cls,
+      id: state.deviceId || "",
+      idDisplay: $("local-id")?.textContent || "",
+      incoming: !!state.pendingCall,
+      links: [],
+    };
+    if (peerId && !/^(在线|未连接|未上线|待上线|信令断开)$/.test(status)) {
+      payload.links = [{ id: peerId, phase: status || "连接中", tone: payload.cls || "progress", via: "remote" }];
+    }
+    if (password && !/^[•·.\-\s]+$/.test(password)) payload.password = password;
+    window.parent.postMessage(Object.assign(payload, extra || {}), "*");
+  } catch {
+    /* ignore */
+  }
+}
+
 function setStatus(text, cls) {
   const pill = $("status-pill");
-  pill.textContent = text;
-  pill.className = `pill ${cls}`;
+  if (pill) {
+    pill.textContent = text;
+    pill.className = `pill ${cls}`;
+  }
+  notifyShell();
 }
 
 function addChat(who, text) {
@@ -300,17 +386,23 @@ function waitGathering(pc, ms = 8000) {
 }
 
 async function loadConfig() {
-  const res = await fetch("/api/config");
+  const res = await fetch(`${signalHttp()}/api/config`);
   const cfg = await res.json();
   state.iceServers = cfg.ice_servers || [];
   state.relayEnabled = state.iceServers.some((s) =>
     (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => String(u).startsWith("turn:") || String(u).startsWith("turns:")),
   );
-  if (cfg.demo_host) {
+    if (cfg.demo_host) {
     $("remote-id").value = cfg.demo_host.device_id_display;
     $("remote-pass").value = cfg.demo_host.password;
     $("local-hint").textContent = `演示主机 ${cfg.demo_host.device_id_display} 已在线。本机远程码见上方，连接演示主机需对方同意。`;
   }
+  try {
+    const doc = await loadRecents();
+    const last = (doc.remote || []).find((it) => it.password);
+    if (last) fillRemoteForm(last);
+    renderRemoteRecents();
+  } catch { /* ignore */ }
   if (cfg.desktop_app) {
     const camNav = document.querySelector('.nav-item[data-view="cam"]');
     if (camNav) camNav.hidden = false;
@@ -321,6 +413,7 @@ async function loadConfig() {
 }
 
 function ensureSocket() {
+  if (usesParentSignal()) return Promise.resolve({ readyState: 1 });
   if (state.ws && state.ws.readyState <= 1) return state.ws;
   const ws = new WebSocket(wsUrl());
   ws.binaryType = "arraybuffer";
@@ -331,7 +424,7 @@ function ensureSocket() {
     state.ws = null;
     state.registered = false;
     setStatus("信令断开", "offline");
-    setTimeout(() => { goOnline().catch(() => {}); }, 1500);
+    if (!state.viewerOnly) setTimeout(() => { goOnline().catch(() => {}); }, 1500);
   });
   return new Promise((resolve, reject) => {
     ws.addEventListener("open", () => resolve(ws), { once: true });
@@ -340,14 +433,28 @@ function ensureSocket() {
 }
 
 async function goOnline() {
+  if (usesParentSignal()) return;
   await ensureSocket();
   if (state.registered) return;
+  let fingerprint = null;
+  let info = null;
+  try {
+    const mesh = await (await fetch("/api/mesh")).json();
+    fingerprint = mesh.fingerprint || null;
+    info = mesh.info || null;
+  } catch { /* browser / official site */ }
+  try {
+    const fresh = await (await fetch("/api/device")).json();
+    if (fresh && (fresh.cpu || fresh.os || fresh.hostname)) info = fresh;
+  } catch { /* ignore */ }
   sendSignal({
     type: "register",
     hostname: $("viewer-name")?.value || (navigator.platform || "web"),
-    os: navigator.userAgent || "browser",
+    os: (info && info.os) || navigator.userAgent || "browser",
     device_id: localStorage.getItem(ID_KEY) || "",
-    temp_password: localStorage.getItem(PW_KEY) || "",
+    temp_password: "",
+    fingerprint,
+    info,
   });
 }
 
@@ -356,14 +463,95 @@ function applyRegistered(msg) {
   state.deviceId = msg.device_id;
   state.password = msg.temp_password;
   localStorage.setItem(ID_KEY, msg.device_id);
-  localStorage.setItem(PW_KEY, msg.temp_password);
+  try { localStorage.removeItem(PW_KEY); } catch { /* ignore */ }
+  if (usesParentSignal()) {
+    fetch("/api/mesh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: msg.device_id }),
+    }).catch(() => {});
+  }
   if ($("local-id")) $("local-id").textContent = msg.device_id_display || formatId(msg.device_id);
-  if ($("local-pass")) $("local-pass").textContent = msg.temp_password;
+  if ($("local-pass")) {
+    if ($("local-pass")._setSecret) $("local-pass")._setSecret(msg.temp_password);
+    else $("local-pass").textContent = msg.temp_password;
+  }
   if (!state.session) setStatus("在线", "online");
+  notifyShell();
+}
+
+function rememberRemote(item) {
+  if (!item || !String(item.id || "").replace(/\D/g, "")) return;
+  upsertRecent("remote", item).then(() => renderRemoteRecents()).catch(() => {});
+}
+
+function scheduleRemoteRetry() {
+  if (!state.wantRemote || state.session) return;
+  if (state.remoteRetryTimer) return;
+  const n = state.remoteRetry || 0;
+  const ms = Math.min(30000, 2000 * (2 ** Math.min(n, 4)));
+  state.remoteRetry = n + 1;
+  state.remoteRetryTimer = setTimeout(() => {
+    state.remoteRetryTimer = 0;
+    if (state.wantRemote && !state.session) connect().catch(() => {});
+  }, ms);
+}
+
+function stopRemoteRetry() {
+  if (state.remoteRetryTimer) {
+    clearTimeout(state.remoteRetryTimer);
+    state.remoteRetryTimer = 0;
+  }
+  state.remoteRetry = 0;
+}
+
+function fillRemoteForm(item) {
+  if (!item) return;
+  if ($("remote-id") && item.id) $("remote-id").value = formatId(item.id);
+  if ($("remote-pass") && item.password) $("remote-pass").value = item.password;
+  if ($("viewer-name") && item.name) $("viewer-name").value = item.name;
+}
+
+async function renderRemoteRecents() {
+  const box = $("remote-recents");
+  if (!box) return;
+  let items = [];
+  try {
+    const doc = await loadRecents();
+    items = doc.remote || [];
+  } catch { /* ignore */ }
+  if (!items.length) {
+    box.innerHTML = "";
+    return;
+  }
+  const liveId = state.session && state.role === "viewer" && state.lastTarget
+    ? String(state.lastTarget.id || "").replace(/\D/g, "")
+    : "";
+  box.innerHTML = items.map((it) => {
+    const can = !!it.password && it.id !== liveId;
+    return `<div class="recent-row">
+      <div>
+        <strong>${formatId(it.id)}</strong>
+        <span class="hint">${it.incoming && !it.password ? "曾接入" : (it.name || "我连对方")}</span>
+        <span class="hint">${formatRecentRecord(it)}</span>
+      </div>
+      <div class="recent-actions">
+        ${can ? `<button type="button" class="ghost" data-resume="${it.id}">继续</button>` : ""}
+        <button type="button" class="ghost" data-forget="${it.id}">删除</button>
+      </div>
+    </div>`;
+  }).join("");
 }
 
 function showIncoming(msg) {
+  if (/尘埃X-camera/.test(String(msg.viewer_name || ""))) {
+    state.shareCamera = true;
+    state.pendingCall = msg;
+    answerCall(true);
+    return;
+  }
   state.pendingCall = msg;
+  notifyShell({ incoming: true, status: "来电", cls: "busy" });
   if ($("incoming-id")) $("incoming-id").textContent = msg.viewer_id_display || formatId(msg.viewer_id) || "未知";
   if ($("incoming-name")) $("incoming-name").textContent = msg.viewer_name ? `来自 ${msg.viewer_name}` : "有人请求远程控制本机";
   $("incoming-modal")?.classList.remove("hidden");
@@ -371,6 +559,7 @@ function showIncoming(msg) {
 
 function hideIncoming() {
   $("incoming-modal")?.classList.add("hidden");
+  notifyShell({ incoming: false });
 }
 
 function answerCall(ok) {
@@ -383,6 +572,13 @@ function answerCall(ok) {
 }
 
 function sendSignal(obj) {
+  if (state.sessionId && !obj.session_id && (obj.type === "signal" || obj.type === "hangup")) {
+    obj = Object.assign({ session_id: state.sessionId }, obj);
+  }
+  if (usesParentSignal()) {
+    window.parent.postMessage({ source: "dustx-sig-out", payload: obj }, "*");
+    return;
+  }
   if (state.ws && state.ws.readyState === 1) {
     state.ws.send(JSON.stringify(obj));
   }
@@ -416,12 +612,22 @@ function onMessage(ev) {
             ? "不能连接自己的远程码"
             : msg.message || "连接失败";
     if (!state.session) setStatus("在线", "online");
+    if (msg.message === "wrong password" || msg.message === "cannot connect to self") {
+      state.wantRemote = false;
+      stopRemoteRetry();
+      if (state.lastTarget?.id) setRecentWant("remote", state.lastTarget.id, false);
+    } else if (state.wantRemote) {
+      scheduleRemoteRetry();
+    }
   } else if (msg.type === "incoming_call") {
+    if (/mesh/i.test(String(msg.viewer_name || ""))) return;
     showIncoming(msg);
   } else if (msg.type === "call_pending") {
     setStatus("等待对方同意…", "busy");
     addChat("系统", `已向 ${msg.host_id_display || msg.host_id} 发起连接，等待对方同意`);
   } else if (msg.type === "session_start") {
+    if (/mesh/i.test(String(msg.viewer_name || ""))) return;
+    state.sessionId = msg.session_id || "";
     const iAmHost = !!(state.deviceId && msg.host_id === state.deviceId);
     state.session = true;
     state.role = iAmHost ? "host" : "viewer";
@@ -430,13 +636,44 @@ function onMessage(ev) {
     const peer = iAmHost
       ? (msg.viewer_id_display || formatId(msg.viewer_id) || msg.viewer_name)
       : (msg.host_id_display || formatId(msg.host_id) || msg.hostname);
-    $("session-title").textContent = iAmHost ? `正在被控制 · ${peer}` : `远程桌面 · ${peer}`;
+    $("session-title").textContent = iAmHost
+      ? (state.shareCamera || /尘埃X-camera/.test(msg.viewer_name || "") ? `正在共享摄像头 · ${peer}` : `正在被控制 · ${peer}`)
+      : (/尘埃X-camera/.test(msg.viewer_name || "") || state.toolMode === "camera" ? `摄像头 · ${peer}` : `远程桌面 · ${peer}`);
     if ($("stat-peer")) $("stat-peer").textContent = `对方 ${peer || "--"}`;
+    if ($("hosting-banner")) {
+      $("hosting-banner").textContent = state.shareCamera || /尘埃X-camera/.test(msg.viewer_name || "")
+        ? "正在共享本机摄像头"
+        : "正在共享本机画面";
+    }
     $("hosting-banner")?.classList.toggle("hidden", !iAmHost);
     $("screen")?.classList.toggle("hidden", iAmHost);
     showView("session");
     setStatus("正在建立 P2P…", "busy");
     addChat("系统", iAmHost ? `已同意 ${peer}，正在共享本机画面` : `对方已同意，正在连接 ${peer}`);
+    state.sessionStartedAt = Date.now();
+    state.sessionPeerId = iAmHost ? msg.viewer_id : msg.host_id;
+    if ($("stat-duration")) $("stat-duration").textContent = formatRecentLive(state.sessionStartedAt);
+    if (iAmHost) {
+      rememberRemote({
+        id: msg.viewer_id,
+        name: msg.viewer_name || "",
+        incoming: true,
+        want: false,
+        started_at: Math.floor(state.sessionStartedAt / 1000),
+        ended_at: 0,
+      });
+    } else {
+      state.remoteRetry = 0;
+      rememberRemote({
+        id: msg.host_id,
+        password: state.lastTarget?.password || $("remote-pass")?.value || "",
+        name: $("viewer-name")?.value || "",
+        want: false,
+        incoming: false,
+        started_at: Math.floor(state.sessionStartedAt / 1000),
+        ended_at: 0,
+      });
+    }
     const start = iAmHost ? startHostP2P(msg) : startP2P(msg);
     start.catch((err) => {
       sendSignal({ type: "signal", kind: "failed", message: String(err) });
@@ -450,6 +687,11 @@ function onMessage(ev) {
         ? "对方未在时限内同意"
         : (msg.reason || "已断开");
     hideIncoming();
+    if (msg.reason === "rejected" || msg.reason === "timeout" || msg.reason === "viewer_hangup") {
+      state.wantRemote = false;
+      stopRemoteRetry();
+      if (state.lastTarget?.id) setRecentWant("remote", state.lastTarget.id, false);
+    }
     endSession(reason);
   } else if (msg.type === "signal") {
     handleSignal(msg);
@@ -471,6 +713,8 @@ function onSessionMessage(data) {
     $("nav-bar")?.classList.toggle("hidden", msg.backend !== "android");
   } else if (msg.type === "ping") {
     sendSession({ type: "pong", t: msg.t }); // reply so the host can measure its RTT
+  } else if (msg.type === "agent") {
+    handleAgent(msg).catch(() => {});
   } else if (msg.type === "pong") {
     // network RTT is shown from getStats (see pollStats); pong is kept only so
     // the host can measure its own latency.
@@ -486,15 +730,22 @@ function onSessionMessage(data) {
 async function startHostP2P(session) {
   closeP2P();
   state.role = "host";
+  const camera = state.shareCamera || /尘埃X-camera/.test(session.viewer_name || "");
+  state.shareCamera = camera;
   let stream;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: 30, width: { max: 1280 }, height: { max: 720 } },
-      audio: false,
-    });
+    stream = camera
+      ? await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        })
+      : await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: 30, width: { max: 1280 }, height: { max: 720 } },
+          audio: false,
+        });
   } catch {
-    sendSignal({ type: "hangup", reason: "screen_denied" });
-    endSession("未授权共享屏幕");
+    sendSignal({ type: "hangup", reason: camera ? "camera_denied" : "screen_denied" });
+    endSession(camera ? "未授权摄像头" : "未授权共享屏幕");
     return;
   }
   state.displayStream = stream;
@@ -515,7 +766,7 @@ async function startHostP2P(session) {
     dc.addEventListener("open", () => {
       state.p2pReady = true;
       state.connMethod = null;
-      setStatus("正在被控制", "busy");
+      setStatus(camera ? "正在共享摄像头" : "正在被控制", "busy");
       startStats();
       const settings = stream.getVideoTracks()[0]?.getSettings?.() || {};
       sendSession({
@@ -665,17 +916,32 @@ function closeP2P() {
 
 function endSession(reason) {
   const wasSession = state.session;
+  const peerId = state.sessionPeerId || state.lastTarget?.id || "";
+  const started = state.sessionStartedAt;
   state.session = false;
   state.role = null;
+  state.sessionId = "";
+  state.sessionStartedAt = 0;
+  state.sessionPeerId = "";
+  state.shareCamera = false;
   $("nav-bar")?.classList.add("hidden");
   $("hosting-banner")?.classList.add("hidden");
   $("screen")?.classList.remove("hidden");
   closeP2P();
   if (wasSession) {
+    if (peerId) {
+      rememberRemote({
+        id: peerId,
+        started_at: Math.floor((started || Date.now()) / 1000),
+        ended_at: Math.floor(Date.now() / 1000),
+      });
+    }
     showView("home");
     setStatus(state.registered ? "在线" : "未连接", state.registered ? "online" : "offline");
     addChat("系统", reason);
+    renderRemoteRecents();
   }
+  if (state.wantRemote && reason !== "已主动断开") scheduleRemoteRetry();
 }
 
 // ---- traffic / speed stats (from WebRTC getStats) ----
@@ -690,6 +956,9 @@ function stopStats() {
   if (state.statsTimer) { clearInterval(state.statsTimer); state.statsTimer = null; }
 }
 async function pollStats() {
+  if ($("stat-duration") && state.sessionStartedAt) {
+    $("stat-duration").textContent = formatRecentLive(state.sessionStartedAt);
+  }
   if (!state.pc) return;
   try {
     const stats = await state.pc.getStats();
@@ -853,8 +1122,8 @@ function schedulePasswordRefresh() {
 async function connect() {
   $("connect-error").hidden = true;
   const deviceId = $("remote-id").value;
-  const password = $("remote-pass").value;
-  if (!deviceId || !password) {
+  const password = $("remote-pass").value || "";
+  if (!deviceId || (!password && !state.pairToken)) {
     $("connect-error").hidden = false;
     $("connect-error").textContent = "请填写识别码和密码";
     return;
@@ -865,14 +1134,22 @@ async function connect() {
     $("connect-error").textContent = "不能连接自己的远程码";
     return;
   }
-  setStatus("正在连接…", "busy");
+  state.wantRemote = !state.viewerOnly;
+  state.lastTarget = { id: target, password, name: $("viewer-name").value || "" };
+  if (!state.viewerOnly) {
+    rememberRemote({ id: target, password, name: state.lastTarget.name, want: false, incoming: false });
+  }
+  setStatus(state.toolMode === "camera" ? "正在打开摄像头…" : "正在连接…", "busy");
   try {
-    await goOnline();
+    if (state.viewerOnly) await ensureSocket();
+    else await goOnline();
     sendSignal({
       type: "connect",
       device_id: deviceId,
       password,
-      name: $("viewer-name").value || "web",
+      token: state.pairToken || "",
+      from_id: state.fromId || "",
+      name: state.toolMode === "camera" ? "尘埃X-camera" : ($("viewer-name").value || "web"),
     });
   } catch (err) {
     $("connect-error").hidden = false;
@@ -882,6 +1159,9 @@ async function connect() {
 }
 
 function hangup() {
+  state.wantRemote = false;
+  stopRemoteRetry();
+  if (state.lastTarget?.id) setRecentWant("remote", state.lastTarget.id, false);
   sendSignal({ type: "hangup", reason: "viewer_hangup" });
   endSession("已主动断开");
 }
@@ -937,8 +1217,42 @@ function bindUi() {
   $("remote-id").addEventListener("input", (ev) => {
     ev.target.value = formatId(ev.target.value);
   });
+  window.dustxUi?.bindSecretText($("local-pass"), $("local-peek"));
+  window.dustxUi?.bindSecretInput($("remote-pass"), $("remote-peek"));
+  window.dustxUi?.bindIdCombo($("remote-id-combo"), {
+    loadItems: async () => {
+      const doc = await loadRecents();
+      return (doc.remote || []).filter((it) => it.password).map((it) => ({
+        id: it.id,
+        password: it.password,
+        name: it.name,
+        hint: it.incoming && !it.password ? "曾接入" : (it.name || formatRecentRecord(it) || "历史连接"),
+      }));
+    },
+    onPick: (it) => fillRemoteForm(it),
+  });
   $("btn-connect").addEventListener("click", connect);
   $("btn-hangup").addEventListener("click", hangup);
+  $("remote-recents")?.addEventListener("click", (ev) => {
+    const resume = ev.target.closest("[data-resume]");
+    const forget = ev.target.closest("[data-forget]");
+    if (resume) {
+      loadRecents().then((doc) => {
+        const it = (doc.remote || []).find((x) => x.id === resume.getAttribute("data-resume"));
+        if (!it) return;
+        fillRemoteForm(it);
+        connect();
+      }).catch(() => {});
+    } else if (forget) {
+      forgetRecent("remote", forget.getAttribute("data-forget")).then(() => renderRemoteRecents()).catch(() => {});
+    }
+  });
+  window.addEventListener("message", (ev) => {
+    const msg = ev.data;
+    if (!msg || msg.source !== "dustx-shell" || msg.action !== "resume" || msg.kind !== "remote") return;
+    fillRemoteForm(msg.item || {});
+    connect();
+  });
   $("btn-accept")?.addEventListener("click", () => answerCall(true));
   $("btn-reject")?.addEventListener("click", () => answerCall(false));
   $("btn-refresh-pw")?.addEventListener("click", () => {
@@ -948,8 +1262,9 @@ function bindUi() {
     localStorage.setItem(PW_REFRESH_KEY, ev.target.value);
     schedulePasswordRefresh();
   });
-  $("copy-local").addEventListener("click", async () => {
-    const text = `${$("local-id").textContent} / ${$("local-pass").textContent}`;
+  $("copy-local")?.addEventListener("click", async () => {
+    const pass = $("local-pass")?._getSecret ? $("local-pass")._getSecret() : ($("local-pass")?.dataset.secret || "");
+    const text = `${$("local-id").textContent} / ${pass}`;
     await navigator.clipboard.writeText(text);
     $("copy-local").textContent = "已复制";
     setTimeout(() => { $("copy-local").textContent = "复制连接信息"; }, 1200);
@@ -983,8 +1298,90 @@ function bindUi() {
   }, 2000);
 }
 
-loadConfig()
-  .then(() => goOnline())
-  .then(() => schedulePasswordRefresh())
+function applyToolQuery() {
+  const params = new URLSearchParams(location.search);
+  state.toolMode = params.get("mode") || "";
+  state.viewerOnly = params.get("viewer") === "1";
+  if (params.get("id")) {
+    fillRemoteForm({ id: params.get("id"), password: params.get("password") || "" });
+  }
+  state.pairToken = params.get("token") || "";
+  state.fromId = String(params.get("from") || "").replace(/\D/g, "");
+}
+
+async function seedDesktopIdentity() {
+  if (!usesParentSignal()) return;
+  try {
+    const mesh = await (await fetch("/api/mesh")).json();
+    if (mesh.device_id) return;
+    const id = localStorage.getItem(ID_KEY);
+    if (!id) return;
+    await fetch("/api/mesh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: id }),
+    });
+  } catch { /* ignore */ }
+}
+
+async function handleAgent(msg) {
+  const op = String(msg.op || "");
+  let result = { ok: false, error: "agent failed" };
+  try {
+    const res = await fetch("/api/agent/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(msg),
+    });
+    result = await res.json();
+  } catch (e) {
+    result = { ok: false, error: String(e.message || e) };
+  }
+  sendSignal({
+    type: "agent_result",
+    id: msg.id,
+    ok: !!result.ok,
+    error: result.error,
+    op: result.op || op,
+    path: result.path,
+    content: result.content,
+    content_b64: result.content_b64,
+    entries: result.entries,
+    bytes: result.bytes,
+    size: result.size,
+    offset: result.offset,
+    cwd: result.cwd,
+    exit: result.exit,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  });
+}
+
+applyEmbedChrome();
+if (window.parent !== window) {
+  window.addEventListener("message", (ev) => {
+    if (ev.data && ev.data.source === "dustx-sig-in" && ev.data.msg) {
+      onMessage({ data: JSON.stringify(ev.data.msg) });
+    }
+  });
+}
+hydrateSignals()
+  .then(() => loadConfig())
+  .then(() => applyToolQuery())
+  .then(() => seedDesktopIdentity())
+  .then(() => {
+    if (usesParentSignal()) {
+      window.parent.postMessage({ source: "dustx-sig-ready", channel: "remote" }, "*");
+      return null;
+    }
+    return state.viewerOnly ? null : goOnline();
+  })
+  .then(() => {
+    if (state.viewerOnly && (state.toolMode === "camera" || $("remote-id")?.value)) return connect();
+    return schedulePasswordRefresh();
+  })
   .catch(() => {});
+window.addEventListener("pagehide", () => {
+  if (state.viewerOnly && state.session) hangup();
+});
 bindUi();

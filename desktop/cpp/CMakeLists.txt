@@ -4,14 +4,31 @@ project(DustX LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/version.hpp" _DUSTX_VERSION_HPP)
+if(NOT _DUSTX_VERSION_HPP MATCHES "kAppVersion = \"([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)\"")
+  message(FATAL_ERROR "src/version.hpp is missing kAppVersion a.b.c.d")
+endif()
+set(DUSTX_APP_VERSION "${CMAKE_MATCH_1}")
+string(REPLACE "." "," DUSTX_APP_VERSION_COMMA "${DUSTX_APP_VERSION}")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/windows/dustx.rc.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/dustx.rc"
+  @ONLY
+)
+
 set(DUSTX_COMMON
   src/main.cpp
   src/server.cpp
   src/cam_hub.cpp
   src/mesh.cpp
+  src/device_fp.cpp
+  src/device_info.cpp
+  src/recents.cpp
+  src/update.cpp
   src/net.cpp
   src/util.cpp
   src/log.cpp
+  src/settings.cpp
   src/agent.cpp
   src/virtual_io.cpp
   src/vcam_shm.cpp
@@ -89,6 +106,8 @@ if(APPLE)
     "-framework CoreAudio"
     "-framework AudioToolbox"
     "-framework CoreFoundation"
+    "-framework IOKit"
+    "-framework Network"
   )
   target_compile_options(DustX PRIVATE -fobjc-arc)
   add_custom_command(TARGET DustX POST_BUILD
@@ -100,6 +119,9 @@ if(APPLE)
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_CURRENT_SOURCE_DIR}/web"
       "$<TARGET_FILE_DIR:DustX>/../Resources/web"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../src/remote/web"
+      "$<TARGET_FILE_DIR:DustX>/../Resources/web/remote-ui"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "$<TARGET_FILE_DIR:DustXMic>/../.."
       "$<TARGET_FILE_DIR:DustX>/../Resources/DustXMic.driver"
@@ -146,9 +168,10 @@ elseif(WIN32)
   target_compile_definitions(DustXMic PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_link_libraries(DustXMic PRIVATE strmiids ole32 oleaut32 uuid)
 
-  add_executable(DustX WIN32 ${DUSTX_COMMON} src/app_windows.cpp src/vcam_install_win.cpp src/mesh_tun_win.cpp src/ssh_host.cpp src/ssh_host_win.cpp)
+  add_executable(DustX WIN32 ${DUSTX_COMMON} src/app_windows.cpp src/vcam_install_win.cpp src/mesh_tun_win.cpp src/ssh_host.cpp src/ssh_host_win.cpp "${CMAKE_CURRENT_BINARY_DIR}/dustx.rc")
   add_dependencies(DustX DustXCam DustXMic)
   set_target_properties(DustX PROPERTIES OUTPUT_NAME "DustX")
+  set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/dustx.rc" PROPERTIES GENERATED TRUE)
   include(FetchContent)
   if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
@@ -171,7 +194,7 @@ elseif(WIN32)
   else()
     set(WV2_LIB "${webview2_SOURCE_DIR}/build/native/x86/WebView2LoaderStatic.lib")
   endif()
-  target_compile_definitions(DustX PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_compile_definitions(DustX PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN "DUSTX_APP_VERSION=\"${DUSTX_APP_VERSION}\"")
   target_link_libraries(DustX PRIVATE
     "${WV2_LIB}"
     ole32 oleaut32 uuid user32 gdi32 advapi32 shlwapi version strmiids iphlpapi ws2_32
@@ -212,6 +235,9 @@ elseif(WIN32)
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_CURRENT_SOURCE_DIR}/web"
       "$<TARGET_FILE_DIR:DustX>/web"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../src/remote/web"
+      "$<TARGET_FILE_DIR:DustX>/web/remote-ui"
     COMMAND ${CMAKE_COMMAND} -E copy
       "$<TARGET_FILE:DustXCam>"
       "$<TARGET_FILE_DIR:DustX>/"

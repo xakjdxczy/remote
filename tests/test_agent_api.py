@@ -85,11 +85,12 @@ def test_agent_roundtrip_without_p2p(monkeypatch):
             "path": "",
         })
 
-    data = asyncio.run(go())
-    assert data["ok"] is True
-    assert data["entries"][0]["name"] == "a"
-    assert ws.sent[0]["type"] == "agent"
-    assert ws.sent[0]["op"] == "list"
+        data = asyncio.run(go())
+        assert data["ok"] is True
+        assert data["entries"][0]["name"] == "a"
+        assert ws.sent[0]["type"] == "agent"
+        assert ws.sent[0]["op"] == "list"
+        assert ws.sent[0]["full"] is True
 
 
 def test_agent_works_while_session_busy(monkeypatch):
@@ -114,6 +115,25 @@ def test_agent_works_while_session_busy(monkeypatch):
     assert data["stdout"] == "user\n"
     assert host_ws.sent[0]["op"] == "exec"
     assert host.session_id  # P2P session still held
+
+
+def test_presence_online_and_unknown(monkeypatch):
+    _install(monkeypatch)
+    client = TestClient(create_app())
+    with client.websocket_connect("/ws") as host:
+        host.send_json({
+            "type": "register",
+            "hostname": "CzhyorPC",
+            "os": "Windows",
+            "device_id": "123123123",
+            "temp_password": "passw0rd",
+        })
+        assert host.receive_json()["type"] == "registered"
+        data = client.post("/api/presence", json={"ids": ["123 123 123", "999999999"]}).json()
+        assert data["ok"] is True
+        assert data["devices"]["123123123"]["online"] is True
+        assert data["devices"]["123123123"]["hostname"] == "CzhyorPC"
+        assert data["devices"]["999999999"]["online"] is False
 
 
 def test_agent_timeout(monkeypatch):

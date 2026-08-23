@@ -53,9 +53,15 @@ def main(argv: list[str] | None = None) -> None:
 
     p_dl = sub.add_parser("upload-download", help="upload a desktop/android package to OSS")
     p_dl.add_argument("kind", choices=["android", "macos", "windows"])
-    p_dl.add_argument("path", help="file, .app, or unpacked folder")
+    p_dl.add_argument("path", nargs="?", default="", help="file, .app, or unpacked folder")
     p_dl.add_argument("--version", default="")
     p_dl.add_argument("--version-code", default="", dest="version_code")
+    p_dl.add_argument(
+        "--from-ssh",
+        default="",
+        help="Windows zip as host:filename (e.g. dustx-windows:DustX-windows.zip). Mac presigns, Windows PUTs, Mac verifies.",
+    )
+    p_dl.add_argument("--expires", type=int, default=7200, help="presigned PUT lifetime when using --from-ssh")
 
     p_app = sub.add_parser("app", help="open the DustX desktop window (macOS / Windows)")
     p_app.add_argument("--host", default="0.0.0.0")
@@ -87,6 +93,13 @@ def main(argv: list[str] | None = None) -> None:
     p_agent.add_argument("--command", default="")
     p_agent.add_argument("extra", nargs=argparse.REMAINDER)
 
+    p_force = sub.add_parser("force-update", help="on the VPS: require desktop clients to update and restart")
+    g_force = p_force.add_mutually_exclusive_group(required=True)
+    g_force.add_argument("--on", action="store_true", help="clients older than --version must update now")
+    g_force.add_argument("--off", action="store_true", help="stop forcing updates")
+    p_force.add_argument("--version", default="", help="minimum version; empty means latest OSS package")
+    p_force.add_argument("--notes", default="", help="short text shown in the client prompt")
+
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -117,7 +130,14 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "upload-apk":
         _upload_apk(args.apk, args.version, args.version_code, args.presign_put, args.expires)
     elif args.cmd == "upload-download":
-        _upload_download(args.kind, args.path, args.version, args.version_code)
+        _upload_download(
+            args.kind,
+            args.path,
+            args.version,
+            args.version_code,
+            from_ssh=getattr(args, "from_ssh", "") or "",
+            expires=int(getattr(args, "expires", 7200) or 7200),
+        )
     elif args.cmd == "cam-sink":
         from remote.cam_sink import main as cam_sink_main
 
@@ -159,6 +179,8 @@ def main(argv: list[str] | None = None) -> None:
         if args.extra:
             agent_argv += args.extra
         raise SystemExit(agent_main(agent_argv))
+    elif args.cmd == "force-update":
+        _force_update(on=bool(args.on), version=args.version, notes=args.notes)
 
 
 def _run_server(host: str, port: int) -> None:
@@ -215,8 +237,38 @@ def _upload_apk(apk: str, version: str, version_code: str, presign_put: bool, ex
         print(f"版本 {info['version']} ({info.get('version_code') or '-'})", flush=True)
 
 
-def _upload_download(kind: str, path: str, version: str, version_code: str) -> None:
+def _upload_download(
+    kind: str,
+    path: str,
+    version: str,
+    version_code: str,
+    *,
+    from_ssh: str = "",
+    expires: int = 7200,
+) -> None:
     from remote.server.oss import MACOS_FILENAME, WINDOWS_FILENAME, archive_for_upload, upload_download
+
+    if from_ssh:
+        if kind != "windows":
+            raise SystemExit("--from-ssh 只用于 windows 包")
+        from remote.server.oss_publish import publish_windows_from_ssh
+
+        info = publish_windows_from_ssh(
+            from_ssh,
+            version=version,
+            version_code=version_code,
+            expires=expires,
+        )
+        via = info.get("via") or ""
+        print(
+            f"已上传 {info['filename']}  ({info['size']} bytes, sha256={info['sha256'][:12]}…, via={via}, verified=yes)",
+            flush=True,
+        )
+        if info.get("version"):
+            print(f"版本 {info['version']}", flush=True)
+        return
+    if not path:
+        raise SystemExit("请提供本地路径，或对 Windows 使用 --from-ssh dustx-windows:DustX-windows.zip")
 
     names = {"macos": MACOS_FILENAME, "windows": WINDOWS_FILENAME, "android": "remotedesk-android.apk"}
     src = Path(path)
@@ -229,11 +281,27 @@ def _upload_download(kind: str, path: str, version: str, version_code: str) -> N
         if ephemeral:
             packaged.unlink(missing_ok=True)
     print(
-        f"已上传 {info['filename']}  ({info['size']} bytes, sha256={info['sha256'][:12]}…)",
+        f"已上传 {info['filename']}  ({info['size']} bytes, sha256={info['sha256'][:12]}…, verified=yes)",
         flush=True,
     )
     if info.get("version"):
         print(f"版本 {info['version']}", flush=True)
+
+
+def _force_update(*, on: bool, version: str, notes: str) -> None:
+    from remote.server.update import policy_path, save_policy
+
+    policy = save_policy(force=on, version=version if on else "", notes=notes if on else "")
+    path = policy_path()
+    if on:
+        target = policy.get("version") or "官方包最新版"
+        print(f"已下发强制更新，低于 {target} 的客户端会立刻更新并重启。", flush=True)
+        if policy.get("notes"):
+            print(f"说明：{policy['notes']}", flush=True)
+    else:
+        print("已取消强制更新。之后启动仍会提示可选更新。", flush=True)
+    if path:
+        print(f"策略已写入 {path}", flush=True)
 
 
 if __name__ == "__main__":

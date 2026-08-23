@@ -58,9 +58,18 @@
         <p>类 ToDesk 的授权远程协助：识别码 + 临时密码即可连接，画面 / 键鼠 / 文件 <b>仅走 WebRTC P2P 直连</b>。网页控制台只做远程控制。手机当摄像头、虚拟摄像头 / 麦克风请用本机尘埃X 桌面程序（局域网或 USB，不经过公网识别码）。手机仍是同一套安卓 App。被控端支持 Windows / macOS / Linux / 安卓。</p>
         <div class="card-actions">
           <a class="card-link" href="/remote/">打开网页控制台 →</a>
-          <a class="card-link dl" data-download="macos" href="/api/downloads/macos?redirect=1">⬇ macOS 桌面程序</a>
-          <a class="card-link dl" data-download="windows" href="/api/downloads/windows?redirect=1">⬇ Windows 桌面程序</a>
-          <a class="card-link dl" id="android-download" data-download="android" href="/api/downloads/android?redirect=1">⬇ 安卓被控端 APK</a>
+          <div class="dl-item">
+            <a class="card-link dl" data-download="macos" href="/api/downloads/macos?redirect=1">⬇ macOS 桌面程序</a>
+            <span class="dl-ver" data-ver="macos">版本 …</span>
+          </div>
+          <div class="dl-item">
+            <a class="card-link dl" data-download="windows" href="/api/downloads/windows?redirect=1">⬇ Windows 桌面程序</a>
+            <span class="dl-ver" data-ver="windows">版本 …</span>
+          </div>
+          <div class="dl-item">
+            <a class="card-link dl" id="android-download" data-download="android" href="/api/downloads/android?redirect=1">⬇ 安卓被控端 APK</a>
+            <span class="dl-ver" data-ver="android">版本 …</span>
+          </div>
         </div>
       </div>
 
@@ -100,6 +109,6 @@
   <p>© <span id="year"></span> 尘埃X · DUST-X ｜ 用尘埃，造星海</p>
 </footer>
 
-<script src="/assets/js/site.js"></script>
+<script src="/assets/js/site.js?v=dlver2"></script>
 </body>
 </html>

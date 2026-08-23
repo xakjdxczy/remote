@@ -38,6 +38,7 @@ DEFAULT_MACOS_KEY = "downloads/dustx-macos.bin"
 DEFAULT_MACOS_META_KEY = "downloads/dustx-macos.json"
 DEFAULT_WINDOWS_KEY = "downloads/dustx-windows.bin"
 DEFAULT_WINDOWS_META_KEY = "downloads/dustx-windows.json"
+DEFAULT_WINDOWS_STAGING_KEY = "downloads/dustx-windows.staging.bin"
 DEFAULT_EXPIRES = 600
 DOWNLOAD_FILENAME = "remotedesk-android.apk"
 MACOS_FILENAME = "dustx-macos.zip"
@@ -138,6 +139,20 @@ def load_config() -> OssConfig | None:
         apk_key=apk_key,
         meta_key=meta_key,
     )
+
+
+def versioned_download_name(kind: str, version: str, fallback: str) -> str:
+    """Put the package version in the saved filename so browsers do not reuse an old zip."""
+    ver = "".join(ch for ch in str(version or "") if ch.isalnum() or ch in "._-")
+    if not ver:
+        return fallback
+    if kind == "windows":
+        return f"DustX-windows-{ver}.zip"
+    if kind == "macos":
+        return f"dustx-macos-{ver}.zip"
+    if kind == "android":
+        return f"remotedesk-android-{ver}.apk"
+    return fallback
 
 
 def _kind_spec(kind: str, cfg: OssConfig) -> dict[str, str]:
@@ -286,7 +301,7 @@ def presign_get(
         raise OssError("OSS is not configured")
     extra: dict[str, str] = {}
     if filename:
-        extra["response-content-disposition"] = f'attachment; filename="{filename}"'
+        extra["response-content-disposition"] = f"attachment; filename={filename}"
         extra["response-content-type"] = content_type or "application/octet-stream"
     uri, query, _headers = _sign_v4(
         method="GET",
@@ -394,6 +409,99 @@ def get_object_text(key: str, *, cfg: OssConfig | None = None) -> str | None:
             return None
         raise
     return body.decode("utf-8")
+
+
+def get_object_bytes(key: str, *, cfg: OssConfig | None = None) -> bytes:
+    config = cfg or load_config()
+    if config is None:
+        raise OssError("OSS is not configured")
+    _status, body, _headers = _request("GET", key, timeout=300, cfg=config)
+    return body
+
+
+def package_file(kind: str, *, cfg: OssConfig | None = None) -> tuple[bytes, str, str]:
+    """Return (bytes, download filename, content-type) for an official package."""
+    config = cfg or load_config()
+    if config is None:
+        raise OssError("OSS is not configured")
+    spec = _kind_spec(kind, config)
+    body = get_object_bytes(spec["key"], cfg=config)
+    meta: dict[str, Any] = {}
+    raw_meta = get_object_text(spec["meta_key"], cfg=config)
+    if raw_meta:
+        try:
+            parsed = json.loads(raw_meta)
+            if isinstance(parsed, dict):
+                meta = parsed
+        except json.JSONDecodeError:
+            meta = {}
+    filename = versioned_download_name(
+        spec["kind"],
+        str(meta.get("version") or ""),
+        str(meta.get("filename") or spec["filename"]),
+    )
+    return body, filename, spec["content_type"]
+
+
+def object_digest(key: str, *, cfg: OssConfig | None = None) -> tuple[str, int]:
+    """GET the object and return (sha256 hex, size). This is the source of truth."""
+    body = get_object_bytes(key, cfg=cfg)
+    return hashlib.sha256(body).hexdigest(), len(body)
+
+
+def delete_object(key: str, *, cfg: OssConfig | None = None) -> None:
+    config = cfg or load_config()
+    if config is None:
+        raise OssError("OSS is not configured")
+    try:
+        _request("DELETE", key, cfg=config)
+    except OssError as exc:
+        if "HTTP 404" in str(exc):
+            return
+        raise
+
+
+def verify_published(
+    kind: str,
+    sha256: str,
+    size: int,
+    *,
+    version: str = "",
+    cfg: OssConfig | None = None,
+) -> dict[str, Any]:
+    """Fail unless the live OSS object and manifest match sha256 and size."""
+    config = cfg or load_config()
+    if config is None:
+        raise OssError("OSS is not configured")
+    spec = _kind_spec(kind, config)
+    want = sha256.lower().strip()
+    if len(want) != 64 or any(c not in "0123456789abcdef" for c in want):
+        raise OssError("invalid sha256")
+    got_sha, got_size = object_digest(spec["key"], cfg=config)
+    if got_sha != want:
+        raise OssError(f"OSS object sha256 mismatch for {spec['key']}")
+    if got_size != size:
+        raise OssError(f"OSS object size mismatch for {spec['key']}: {got_size} != {size}")
+    raw = get_object_text(spec["meta_key"], cfg=config)
+    if not raw:
+        raise OssError(f"missing manifest {spec['meta_key']}")
+    try:
+        meta = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise OssError("manifest is not JSON") from exc
+    if not isinstance(meta, dict):
+        raise OssError("manifest is not an object")
+    if str(meta.get("sha256") or "").lower() != want:
+        raise OssError("manifest sha256 mismatch")
+    try:
+        meta_size = int(meta.get("size") or 0)
+    except (TypeError, ValueError) as exc:
+        raise OssError("manifest size is not an integer") from exc
+    if meta_size != size:
+        raise OssError("manifest size mismatch")
+    if version and str(meta.get("version") or "") != str(version):
+        raise OssError("manifest version mismatch")
+    return meta
 
 
 _MULTIPART_THRESHOLD = 8 * 1024 * 1024
@@ -671,6 +779,11 @@ def upload_download(
     )
     info = _package_info(spec["key"], download_name, len(data), digest, uploaded_at, version, version_code)
     write_manifest(spec["meta_key"], info, cfg=config)
+    verify_published(kind, digest, len(data), version=version, cfg=config)
+    if version:
+        from remote.server.update import follow_published_version
+
+        follow_published_version(version)
     return info
 
 
@@ -779,7 +892,11 @@ def download_payload(kind: str, *, expires: int = DEFAULT_EXPIRES, cfg: OssConfi
                 meta = parsed
         except json.JSONDecodeError:
             meta = {}
-    filename = str(meta.get("filename") or spec["filename"])
+    filename = versioned_download_name(
+        spec["kind"],
+        str(meta.get("version") or ""),
+        str(meta.get("filename") or spec["filename"]),
+    )
     url = presign_get(
         spec["key"],
         expires=expires,

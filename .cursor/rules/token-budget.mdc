@@ -1,0 +1,17 @@
+---
+description: Keep this Mac control-plane chat cheap; stop retry loops
+alwaysApply: true
+---
+
+# Token budget
+
+This session is the control plane. Tokens die on retries, dumps, and re-reading history.
+
+- Answer first. No recap of the last two days unless asked.
+- Do not read agent transcripts or dump `git status` / build trees unless that is the task.
+- One probe, then act. Same failure twice (agent `host disconnected`, SSH refused, port closed) → stop and tell the user. Do not poll 10–20 times.
+- Never fetch or print device passwords from the VPS (sqlite, `get_password`, `device_passwords`). Use mesh SSH (`dustx-windows`) or already-open local APIs. If those are down, stop and say so.
+- Prefer `ssh dustx-windows` when mesh is up. Do not start mesh unless SSH is needed this turn.
+- Publish verify: hash + size + version from `/api/downloads/*` is enough. Do not GET the full zip unless hashes disagree.
+- Commands: print only the lines that change the next step. No full cmake / certutil / tasklist dumps.
+- Do not launch extra subagents, canvases, or parallel repo-wide greps for a single-host question.

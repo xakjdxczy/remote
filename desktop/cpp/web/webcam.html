@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>摄像头</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; color: #eee; font-family: "Segoe UI", "PingFang SC", sans-serif; }
+    body { display: flex; flex-direction: column; }
+    header { padding: 12px 16px; background: #1b1b1b; }
+    h1 { margin: 0; font-size: 16px; }
+    p { margin: 4px 0 0; color: #aaa; font-size: 12px; }
+    video { flex: 1; width: 100%; object-fit: contain; background: #000; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>本机摄像头</h1>
+    <p>预览这台电脑的摄像头。看对方摄像头请在设备列表里点「摄像头」。</p>
+  </header>
+  <video id="v" autoplay playsinline></video>
+  <script>
+    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      .then((stream) => { document.getElementById("v").srcObject = stream; })
+      .catch((err) => { document.querySelector("p").textContent = "无法打开摄像头：" + err.message; });
+  </script>
+</body>
+</html>

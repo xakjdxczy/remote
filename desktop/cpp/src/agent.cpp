@@ -34,6 +34,7 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr size_t kMaxFile = 1 << 20;
+constexpr size_t kMaxChunk = 384 << 10;
 constexpr size_t kMaxExecOut = 256 << 10;
 constexpr int kMaxList = 500;
 constexpr int kExecTimeoutMs = 30000;
@@ -85,6 +86,20 @@ bool under_root(const fs::path& root, const fs::path& candidate) {
   return s != ".." && s.rfind("../", 0) != 0;
 }
 
+bool is_abs_path(const std::string& raw) {
+  if (raw.empty()) return false;
+  return path_from_utf8(raw).is_absolute();
+}
+
+bool is_volume_root(const fs::path& p) {
+  std::error_code ec;
+  const fs::path n = fs::weakly_canonical(p, ec);
+  const fs::path use = ec ? p.lexically_normal() : n;
+  if (use == use.root_path()) return true;
+  const std::string s = path_utf8(use);
+  return s.size() == 3 && s[1] == ':' && (s[2] == '\\' || s[2] == '/');
+}
+
 bool resolve_path(const std::string& raw, fs::path* out, std::string* err) {
   const std::string root_s = agent_root();
   if (root_s.empty()) {
@@ -93,7 +108,7 @@ bool resolve_path(const std::string& raw, fs::path* out, std::string* err) {
   }
   const fs::path root = path_from_utf8(root_s).lexically_normal();
   fs::path candidate;
-  if (raw.empty() || raw == "." || raw == "/" || raw == "\\") {
+  if (raw.empty() || raw == ".") {
     candidate = root;
   } else {
     const fs::path given = path_from_utf8(raw);
@@ -108,7 +123,7 @@ bool resolve_path(const std::string& raw, fs::path* out, std::string* err) {
       return false;
     }
   }
-  if (!under_root(root, candidate)) {
+  if (!is_abs_path(raw) && !under_root(root, candidate)) {
     *err = "path outside home";
     return false;
   }
@@ -153,13 +168,31 @@ std::string list_dir(const fs::path& target) {
   return o.str();
 }
 
-std::string read_file_op(const fs::path& target) {
+std::string read_file_op(const fs::path& target, long long offset, long long length) {
   std::error_code ec;
   if (!fs::is_regular_file(target, ec)) return err_json("not a file", path_utf8(target));
   const auto size = fs::file_size(target, ec);
-  if (ec || size > kMaxFile) {
-    return err_json(ec ? "read failed" : "file too large", path_utf8(target));
+  if (ec) return err_json("read failed", path_utf8(target));
+  if (offset > 0 || length > 0) {
+    if (offset < 0 || static_cast<unsigned long long>(offset) > size) {
+      return err_json("bad offset", path_utf8(target));
+    }
+    unsigned long long take = length > 0 ? static_cast<unsigned long long>(length)
+                                         : std::min<unsigned long long>(kMaxChunk, size - offset);
+    if (take > kMaxChunk) return err_json("chunk too large");
+    auto in = open_in(path_utf8(target));
+    if (!in) return err_json("read failed", path_utf8(target));
+    in.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    std::string data(static_cast<size_t>(take), '\0');
+    in.read(data.data(), static_cast<std::streamsize>(take));
+    data.resize(in.gcount() > 0 ? static_cast<size_t>(in.gcount()) : 0);
+    std::ostringstream o;
+    o << "{\"ok\":true,\"op\":\"read\",\"path\":\"" << json_escape(path_utf8(target)) << "\",\"size\":" << size
+      << ",\"offset\":" << offset << ",\"bytes\":" << data.size() << ",\"content_b64\":\""
+      << json_escape(base64_encode(data)) << "\"}";
+    return o.str();
   }
+  if (size > kMaxFile) return err_json("file too large", path_utf8(target));
   auto in = open_in(path_utf8(target));
   if (!in) return err_json("read failed", path_utf8(target));
   std::string data(static_cast<size_t>(size), '\0');
@@ -168,15 +201,42 @@ std::string read_file_op(const fs::path& target) {
   const auto got = in.gcount();
   data.resize(got > 0 ? static_cast<size_t>(got) : 0);
   std::ostringstream o;
-  o << "{\"ok\":true,\"op\":\"read\",\"path\":\"" << json_escape(path_utf8(target)) << "\",\"content\":\""
-    << json_escape(data) << "\"}";
+  o << "{\"ok\":true,\"op\":\"read\",\"path\":\"" << json_escape(path_utf8(target)) << "\",\"size\":" << size
+    << ",\"content\":\"" << json_escape(data) << "\"}";
   return o.str();
 }
 
-std::string write_file_op(const fs::path& target, const std::string& content) {
-  if (content.size() > kMaxFile) return err_json("content too large");
+std::string write_file_op(const fs::path& target, const std::string& content, const std::string& content_b64,
+                          long long offset) {
   std::error_code ec;
   fs::create_directories(target.parent_path(), ec);
+  if (!content_b64.empty()) {
+    const std::string data = base64_decode(content_b64);
+    if (data.size() > kMaxChunk) return err_json("content too large");
+    if (offset < 0) return err_json("bad offset");
+    if (offset == 0) {
+      auto out = open_out(path_utf8(target));
+      if (!out) return err_json("write failed", path_utf8(target));
+      out.write(data.data(), static_cast<std::streamsize>(data.size()));
+      if (!out) return err_json("write failed", path_utf8(target));
+    } else {
+      if (!fs::exists(target, ec)) return err_json("file not found", path_utf8(target));
+#ifdef _WIN32
+      std::fstream out(utf8_to_wide(path_utf8(target)), std::ios::binary | std::ios::in | std::ios::out);
+#else
+      std::fstream out(path_utf8(target), std::ios::binary | std::ios::in | std::ios::out);
+#endif
+      if (!out) return err_json("write failed", path_utf8(target));
+      out.seekp(static_cast<std::streamoff>(offset), std::ios::beg);
+      out.write(data.data(), static_cast<std::streamsize>(data.size()));
+      if (!out) return err_json("write failed", path_utf8(target));
+    }
+    std::ostringstream o;
+    o << "{\"ok\":true,\"op\":\"write\",\"path\":\"" << json_escape(path_utf8(target)) << "\",\"bytes\":"
+      << data.size() << ",\"offset\":" << offset << "}";
+    return o.str();
+  }
+  if (content.size() > kMaxFile) return err_json("content too large");
   auto out = open_out(path_utf8(target));
   if (!out) return err_json("write failed", path_utf8(target));
   out.write(content.data(), static_cast<std::streamsize>(content.size()));
@@ -187,12 +247,110 @@ std::string write_file_op(const fs::path& target, const std::string& content) {
   return o.str();
 }
 
+std::string mkdir_op(const fs::path& target) {
+  std::error_code ec;
+  fs::create_directories(target, ec);
+  if (ec) return err_json(ec.message(), path_utf8(target));
+  std::ostringstream o;
+  o << "{\"ok\":true,\"op\":\"mkdir\",\"path\":\"" << json_escape(path_utf8(target)) << "\"}";
+  return o.str();
+}
+
+std::string rm_op(const fs::path& target) {
+  std::error_code ec;
+  if (!fs::exists(target, ec)) return err_json("not found", path_utf8(target));
+  if (is_volume_root(target)) return err_json("refusing to delete a volume root", path_utf8(target));
+  const auto n = fs::remove_all(target, ec);
+  if (ec || n == 0) return err_json(ec ? ec.message() : "delete failed", path_utf8(target));
+  std::ostringstream o;
+  o << "{\"ok\":true,\"op\":\"rm\",\"path\":\"" << json_escape(path_utf8(target)) << "\"}";
+  return o.str();
+}
+
+std::string list_volumes() {
+  std::ostringstream o;
+  o << "{\"ok\":true,\"op\":\"volumes\",\"entries\":[";
+  int n = 0;
 #ifdef _WIN32
-std::wstring system_cmd() {
+  const DWORD mask = GetLogicalDrives();
+  for (int i = 0; i < 26; ++i) {
+    if (!(mask & (1u << i))) continue;
+    const char letter = static_cast<char>('A' + i);
+    std::string path(1, letter);
+    path += ":\\";
+    if (GetDriveTypeW(utf8_to_wide(path).c_str()) == DRIVE_NO_ROOT_DIR) continue;
+    if (n) o << ",";
+    o << "{\"name\":\"" << letter << ":\",\"path\":\"" << json_escape(path) << "\",\"dir\":true}";
+    ++n;
+  }
+#else
+  o << "{\"name\":\"/\",\"path\":\"/\",\"dir\":true}";
+  n = 1;
+  const char* extras[] = {"/Volumes", "/media", "/mnt"};
+  for (const char* base : extras) {
+    std::error_code ec;
+    if (!fs::is_directory(base, ec)) continue;
+    for (const auto& entry : fs::directory_iterator(base, fs::directory_options::skip_permission_denied, ec)) {
+      if (!entry.is_directory(ec)) continue;
+      if (n) o << ",";
+      o << "{\"name\":\"" << json_escape(path_utf8(entry.path().filename())) << "\",\"path\":\""
+        << json_escape(path_utf8(entry.path())) << "\",\"dir\":true}";
+      ++n;
+    }
+  }
+#endif
+  o << "]}";
+  return o.str();
+}
+
+#ifdef _WIN32
+std::wstring system_powershell() {
   wchar_t dir[MAX_PATH];
   const UINT n = GetSystemDirectoryW(dir, MAX_PATH);
-  if (n == 0 || n >= MAX_PATH) return L"cmd.exe";
-  return std::wstring(dir) + L"\\cmd.exe";
+  if (n > 0 && n < MAX_PATH) {
+    const std::wstring p = std::wstring(dir) + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
+    if (GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES) return p;
+  }
+  return L"powershell.exe";
+}
+
+bool looks_like_utf8(const std::string& s) {
+  const auto* p = reinterpret_cast<const unsigned char*>(s.data());
+  size_t i = 0;
+  const size_t n = s.size();
+  while (i < n) {
+    if (p[i] < 0x80) {
+      i += 1;
+      continue;
+    }
+    int need = 0;
+    if ((p[i] & 0xE0) == 0xC0) need = 1;
+    else if ((p[i] & 0xF0) == 0xE0) need = 2;
+    else if ((p[i] & 0xF8) == 0xF0) need = 3;
+    else return false;
+    if (i + static_cast<size_t>(need) >= n) return false;
+    for (int j = 1; j <= need; ++j) {
+      if ((p[i + j] & 0xC0) != 0x80) return false;
+    }
+    i += 1 + static_cast<size_t>(need);
+  }
+  return true;
+}
+
+std::string win_bytes_to_utf8(const std::string& raw) {
+  if (raw.empty() || looks_like_utf8(raw)) return raw;
+  const UINT cps[] = {GetConsoleOutputCP(), GetACP(), 936, 437};
+  for (UINT cp : cps) {
+    if (!cp) continue;
+    const int wlen = MultiByteToWideChar(cp, MB_ERR_INVALID_CHARS, raw.data(), static_cast<int>(raw.size()), nullptr, 0);
+    if (wlen <= 0) continue;
+    std::wstring w(static_cast<size_t>(wlen), 0);
+    if (MultiByteToWideChar(cp, MB_ERR_INVALID_CHARS, raw.data(), static_cast<int>(raw.size()), w.data(), wlen) <= 0) {
+      continue;
+    }
+    return wide_to_utf8(w);
+  }
+  return raw;
 }
 
 std::string run_exec(const std::string& command, const fs::path& cwd) {
@@ -212,8 +370,17 @@ std::string run_exec(const std::string& command, const fs::path& cwd) {
   si.hStdError = write_pipe;
   si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 
-  const std::wstring exe = system_cmd();
-  std::wstring line = L"\"" + exe + L"\" /c " + utf8_to_wide(command);
+  const std::wstring exe = system_powershell();
+  const std::wstring script =
+      L"[Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false; "
+      L"[Console]::OutputEncoding = [Console]::InputEncoding; "
+      L"$OutputEncoding = [Console]::OutputEncoding; " +
+      utf8_to_wide(command);
+  const std::string encoded = base64_encode(
+      std::string(reinterpret_cast<const char*>(script.data()), script.size() * sizeof(wchar_t)));
+  const std::wstring line = L"\"" + exe +
+                            L"\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " +
+                            utf8_to_wide(encoded);
   std::vector<wchar_t> buf(line.begin(), line.end());
   buf.push_back(0);
   const std::wstring cwd_w = cwd.wstring();
@@ -264,6 +431,7 @@ std::string run_exec(const std::string& command, const fs::path& cwd) {
   CloseHandle(pi.hProcess);
   CloseHandle(read_pipe);
   if (timed_out) return err_json("timeout");
+  acc = win_bytes_to_utf8(acc);
   std::ostringstream o;
   o << "{\"ok\":true,\"op\":\"exec\",\"exit\":" << static_cast<int>(code) << ",\"stdout\":\"" << json_escape(acc)
     << "\",\"stderr\":\"\"}";
@@ -354,9 +522,13 @@ std::string agent_run(const std::string& body) {
   const std::string op = json_get_string(body, "op");
   const std::string path = json_get_string(body, "path");
   const std::string content = json_get_string(body, "content");
+  const std::string content_b64 = json_get_string(body, "content_b64");
   const std::string command = json_get_string(body, "command");
   const std::string cwd = json_get_string(body, "cwd");
+  const long long offset = json_get_ll(body, "offset", 0);
+  const long long length = json_get_ll(body, "length", 0);
   log_info("agent", op + (path.empty() ? "" : " " + path));
+  if (op == "volumes") return list_volumes();
   if (op == "exec") {
     if (command.empty()) return err_json("command required");
     fs::path work;
@@ -366,15 +538,17 @@ std::string agent_run(const std::string& body) {
     if (!fs::is_directory(work, ec)) return err_json("cwd is not a directory", path_utf8(work));
     return run_exec(command, work);
   }
-  if (op != "list" && op != "read" && op != "write") {
-    return err_json("unknown op (list/read/write/exec)");
+  if (op != "list" && op != "read" && op != "write" && op != "mkdir" && op != "rm") {
+    return err_json("unknown op (list/read/write/exec/mkdir/rm/volumes)");
   }
   fs::path target;
   std::string err;
   if (!resolve_path(path, &target, &err)) return err_json(err);
   if (op == "list") return list_dir(target);
-  if (op == "read") return read_file_op(target);
-  return write_file_op(target, content);
+  if (op == "read") return read_file_op(target, offset, length);
+  if (op == "write") return write_file_op(target, content, content_b64, offset);
+  if (op == "mkdir") return mkdir_op(target);
+  return rm_op(target);
 }
 
 }  // namespace dustx

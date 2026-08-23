@@ -1,16 +1,48 @@
+import hashlib
+import json
 from datetime import datetime, timezone
 
 from remote.server.oss import (
+    DEFAULT_WINDOWS_KEY,
+    DEFAULT_WINDOWS_META_KEY,
     MACOS_FILENAME,
     WINDOWS_FILENAME,
     OssConfig,
+    versioned_download_name,
     OssError,
     _kind_spec,
     _xml_text,
     load_config,
     presign_get,
     presign_put,
+    verify_published,
 )
+
+
+def install_oss_store(monkeypatch):
+    """In-memory OSS. Tests must not talk to a real bucket."""
+    store: dict[str, bytes] = {}
+
+    def _request(method, key, *, body=b"", content_type=None, meta=None, extra_query=None, timeout=300, cfg=None):
+        method = method.upper()
+        if method == "GET":
+            if key not in store:
+                raise OssError(f"OSS GET {key} failed: HTTP 404")
+            return 200, store[key], {}
+        if method == "HEAD":
+            if key not in store:
+                raise OssError(f"OSS HEAD {key} failed: HTTP 404")
+            return 200, b"", {"content-length": str(len(store[key]))}
+        if method == "PUT":
+            store[key] = body
+            return 200, b"", {}
+        if method == "DELETE":
+            store.pop(key, None)
+            return 204, b"", {}
+        raise OssError(f"OSS {method} {key} failed: unsupported in fake")
+
+    monkeypatch.setattr("remote.server.oss._request", _request)
+    return store
 
 
 AWS_EXAMPLE = OssConfig(
@@ -83,6 +115,13 @@ def test_presign_put_is_sigv4_query():
     assert "X-Amz-Signature=" in url
 
 
+def test_versioned_download_name():
+    assert versioned_download_name("windows", "2026.8.21.7", WINDOWS_FILENAME) == "DustX-windows-2026.8.21.7.zip"
+    assert versioned_download_name("macos", "2026.8.21.6", MACOS_FILENAME) == "dustx-macos-2026.8.21.6.zip"
+    assert versioned_download_name("android", "1.9.6", "remotedesk-android.apk") == "remotedesk-android-1.9.6.apk"
+    assert versioned_download_name("windows", "", WINDOWS_FILENAME) == WINDOWS_FILENAME
+
+
 def test_kind_spec_desktop_keys():
     spec = _kind_spec("macos", AWS_EXAMPLE)
     assert spec["filename"] == MACOS_FILENAME
@@ -105,5 +144,58 @@ def test_presign_includes_attachment_filename():
         now=datetime(2013, 5, 24, tzinfo=timezone.utc),
         cfg=AWS_EXAMPLE,
     )
-    assert "response-content-disposition=attachment%3B%20filename%3D%22remotedesk-android.apk%22" in url
+    assert "response-content-disposition=attachment%3B%20filename%3Dremotedesk-android.apk" in url
     assert "X-Amz-Signature=" in url
+
+
+def _windows_manifest(data: bytes, version: str = "2026.8.21") -> bytes:
+    return json.dumps(
+        {
+            "key": DEFAULT_WINDOWS_KEY,
+            "filename": WINDOWS_FILENAME,
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "uploaded_at": "2026-08-21T00:00:00Z",
+            "version": version,
+            "version_code": None,
+        }
+    ).encode("utf-8")
+
+
+def test_verify_published_requires_live_get_match(monkeypatch):
+    store = install_oss_store(monkeypatch)
+    data = b"dustx-windows-zip"
+    digest = hashlib.sha256(data).hexdigest()
+    store[DEFAULT_WINDOWS_KEY] = data
+    store[DEFAULT_WINDOWS_META_KEY] = _windows_manifest(data)
+    meta = verify_published("windows", digest, len(data), version="2026.8.21", cfg=AWS_EXAMPLE)
+    assert meta["sha256"] == digest
+    assert int(meta["size"]) == len(data)
+    assert meta["version"] == "2026.8.21"
+
+
+def test_verify_published_rejects_object_hash_mismatch(monkeypatch):
+    store = install_oss_store(monkeypatch)
+    data = b"expected-bytes"
+    other = b"tampered-bytes"
+    store[DEFAULT_WINDOWS_KEY] = other
+    store[DEFAULT_WINDOWS_META_KEY] = _windows_manifest(data)
+    try:
+        verify_published("windows", hashlib.sha256(data).hexdigest(), len(data), cfg=AWS_EXAMPLE)
+    except OssError as exc:
+        assert "sha256 mismatch" in str(exc)
+    else:
+        raise AssertionError("expected OssError")
+
+
+def test_verify_published_rejects_manifest_mismatch(monkeypatch):
+    store = install_oss_store(monkeypatch)
+    data = b"expected-bytes"
+    store[DEFAULT_WINDOWS_KEY] = data
+    store[DEFAULT_WINDOWS_META_KEY] = _windows_manifest(b"other-bytes")
+    try:
+        verify_published("windows", hashlib.sha256(data).hexdigest(), len(data), cfg=AWS_EXAMPLE)
+    except OssError as exc:
+        assert "manifest" in str(exc)
+    else:
+        raise AssertionError("expected OssError")

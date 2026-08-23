@@ -109,9 +109,9 @@ docker compose up --build -d
 
 ### 云端 / CLI 连 Windows（打洞 + 应用协议）
 
-Windows 尘埃X 互访页先点「上线」。两种方式都支持，不要把家里的 SSH/RDP 暴露到公网。
+Windows 尘埃X 打开就会上线。两种方式都支持，不要把家里的 SSH/RDP 暴露到公网。
 
-**打洞**（和 Mac 互访同一条 WebRTC 数据通道；同时只能有一路 P2P）：
+**打洞**（和桌面互访同一条 WebRTC 数据通道；一台可同时挂多路互访，每路一个本地端口）：
 
 ```bash
 python -m remote mesh --device <识别码> --password <密码>
@@ -143,7 +143,8 @@ export OSS_BUCKET="<bucket>"
 python -m remote upload-apk android/app/build/outputs/apk/debug/app-debug.apk \
   --version 1.8.1 --version-code 15
 python -m remote upload-download macos desktop/mac/尘埃X.app
-python -m remote upload-download windows desktop/windows/DustX
+# Windows：zip 留在 PC 上。本机签发 PUT，Windows 直传，本机 GET 对象算 sha256，与 Windows 本地哈希一致才算成功
+python -m remote upload-download windows --from-ssh dustx-windows:DustX-windows.zip --version 2026.8.21
 
 # 只签发限时 PUT 链接，拿到能访问 OSS 的电脑上再用 curl -T 上传
 python -m remote upload-apk android/app/build/outputs/apk/debug/app-debug.apk \
@@ -213,7 +214,8 @@ python -m remote host --server ws://服务器IP:8080/ws
 | `python -m remote host --backend android` | 经 ADB 控制安卓设备 |
 | `python -m remote demo` | 本地同时拉起信令和演示主机 |
 | `python -m remote upload-apk <apk>` | 把安卓包上传到 OSS，供官网下载 |
-| `python -m remote upload-download macos|windows|android <path>` | 把桌面/安卓包装进 OSS |
+| `python -m remote upload-download macos|windows|android <path>` | 把桌面/安卓包装进 OSS（上传后 GET 校验 sha256） |
+| `python -m remote upload-download windows --from-ssh dustx-windows:DustX-windows.zip` | Windows 直传 OSS；本机只签发 PUT 并 GET 校验 |
 | `python -m remote mesh --device --password` | 跨网互访打洞，本机 `2222` 转到对端 |
 | `python -m remote agent --device --password list\|read\|write\|exec` | 应用层协议，不占 P2P |
 

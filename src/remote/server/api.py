@@ -9,19 +9,24 @@ import re
 import sys
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from remote.ids import constant_time_equals, format_device_id, normalize_device_id
+from remote.device_info import sanitize_info
+from remote.ids import constant_time_equals, format_device_id, is_usable_temp_password, normalize_device_id
 from remote.p2p import SIGNAL_KINDS, ice_servers_payload
 from remote.protocol import decode_json, encode_json
 from remote.server import camlink, oss
-from remote.server.registry import Registry
+from remote.server.device_db import attach_device_db
+from remote.server.id_store import attach_store
+from remote.server.registry import Registry, is_mesh_label
+from remote.server.update import policy_stamp, update_hint, update_payload
 
 logger = logging.getLogger("remotedesk.server")
 
@@ -36,15 +41,84 @@ def web_dir() -> Path:
 WEB_DIR = web_dir()
 
 registry = Registry()
+attach_store(registry)
+attach_device_db(registry)
 demo_host: dict[str, str] | None = None
 SERVER_START = time.time()
 CALL_TIMEOUT_SEC = 45
 AGENT_TIMEOUT_SEC = 60
 AGENT_MAX_CONTENT = 1 << 20
-AGENT_OPS = frozenset({"list", "read", "write", "exec"})
+AGENT_OPS = frozenset({"list", "read", "write", "exec", "mkdir", "rm", "volumes"})
 _pending_timers: dict[str, asyncio.Task] = {}
 # request_id -> (host_id, future)
 _agent_pending: dict[str, tuple[str, asyncio.Future]] = {}
+
+
+def _peer_ip(ws: WebSocket) -> str:
+    forwarded = ws.headers.get("x-forwarded-for") or ws.headers.get("x-real-ip") or ""
+    if forwarded:
+        return str(forwarded).split(",")[0].strip()[:64]
+    if ws.client and ws.client.host:
+        return str(ws.client.host)[:64]
+    return ""
+
+
+def _pretty_hostname(hostname: str, info: dict[str, Any] | None) -> str:
+    info = info or {}
+    name = str(info.get("hostname") or "").strip()
+    if name and "mesh" not in name.lower():
+        return name
+    host = (hostname or "").strip()
+    if host and "mesh" not in host.lower() and host.lower() not in {"unknown", "web"}:
+        return host
+    return str(info.get("model") or host or "")
+
+
+def _presence_entry(did: str) -> dict[str, Any]:
+    host = registry.get(did)
+    stored = None
+    hw = getattr(registry, "hw", None)
+    if hw is not None and hasattr(hw, "load_info"):
+        try:
+            stored = hw.load_info(did)
+        except Exception:
+            stored = None
+    info = dict((host.info if host else {}) or {})
+    if stored and isinstance(stored.get("info"), dict):
+        for key, value in stored["info"].items():
+            info.setdefault(key, value)
+    ip = (host.last_ip if host else "") or ((stored or {}).get("last_ip") or "")
+    last_seen = 0.0
+    if host:
+        last_seen = float(host.last_seen or 0)
+    elif stored:
+        last_seen = float(stored.get("updated_at") or 0)
+    hostname = _pretty_hostname(host.hostname if host else "", info)
+    os_name = str(info.get("os") or (host.os_name if host else "") or "")
+    return {
+        "online": host is not None,
+        "hostname": hostname,
+        "os": os_name,
+        "ip": ip,
+        "last_seen": int(last_seen) if last_seen else 0,
+        "info": info,
+    }
+
+
+def _apply_info(device: Any, raw: Any, ip: str = "") -> None:
+    extra = sanitize_info(raw)
+    if extra:
+        merged = dict(device.info or {})
+        merged.update(extra)
+        device.info = sanitize_info(merged)
+    if ip:
+        device.last_ip = ip
+    hw = getattr(registry, "hw", None)
+    if hw is not None and hasattr(hw, "save_info") and (extra or ip):
+        try:
+            hw.save_info(device.device_id, device.info, device.last_ip)
+        except Exception:
+            pass
 
 
 def _net_bytes() -> int | None:
@@ -114,14 +188,66 @@ def _scrape_coturn_bytes() -> int | None:
         return None
 
 
+def _device_version(device: Any) -> str:
+    info = getattr(device, "info", None) or {}
+    return str(info.get("version") or "")
+
+
+async def broadcast_update() -> int:
+    sent = 0
+    for device in list(registry.devices.values()):
+        hint = update_hint(_device_version(device))
+        try:
+            await device.ws.send_text(encode_json({"type": "update", **hint}))
+            sent += 1
+        except Exception:
+            logger.exception("update broadcast failed")
+    return sent
+
+
+async def _watch_update_policy() -> None:
+    last = policy_stamp()
+    while True:
+        await asyncio.sleep(2)
+        cur = policy_stamp()
+        if cur == last:
+            continue
+        last = cur
+        if cur[0]:
+            await broadcast_update()
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    task = asyncio.create_task(_watch_update_policy())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="RemoteDesk", version="0.1.0")
+    app = FastAPI(title="RemoteDesk", version="0.1.0", lifespan=_lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def allow_desktop_iframe(request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = "frame-ancestors *"
+        return response
+
+    @app.get("/api/app.js")
+    async def app_boot_js() -> Response:
+        return Response("window.DUSTX_SIGNAL_HTTP=window.DUSTX_SIGNAL_HTTP||\"\";\n", media_type="application/javascript")
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -130,6 +256,19 @@ def create_app() -> FastAPI:
     @app.post("/api/agent")
     async def agent_http(body: dict[str, Any]) -> Any:
         return await _dispatch_agent(body)
+
+    @app.post("/api/presence")
+    async def presence(body: dict[str, Any]) -> dict[str, Any]:
+        ids = body.get("ids") if isinstance(body, dict) else None
+        if not isinstance(ids, list):
+            ids = []
+        devices: dict[str, Any] = {}
+        for raw in ids:
+            did = normalize_device_id(str(raw or ""))
+            if len(did) != 9 or did in devices:
+                continue
+            devices[did] = _presence_entry(did)
+        return {"ok": True, "devices": devices}
 
     @app.get("/api/stats")
     async def stats() -> dict[str, Any]:
@@ -181,6 +320,40 @@ def create_app() -> FastAPI:
         if redirect:
             return RedirectResponse(payload["url"], status_code=302)
         return payload
+
+    @app.get("/api/update")
+    async def official_update(platform: str = "", current: str = "") -> dict[str, Any]:
+        kind = (platform or "").strip().lower()
+        if kind not in {"macos", "windows", "darwin", "mac"}:
+            raise HTTPException(status_code=400, detail="platform required")
+        return await asyncio.to_thread(update_payload, kind, current)
+
+    @app.get("/api/update/file")
+    async def official_update_file(platform: str = "") -> Response:
+        """Stream the official zip through this host so old Windows curl can fetch it.
+
+        Presigned OSS URLs break the desktop updater's curl config (quotes / length).
+        """
+        kind = (platform or "").strip().lower()
+        if kind in {"darwin", "mac"}:
+            kind = "macos"
+        if kind not in {"macos", "windows"}:
+            raise HTTPException(status_code=400, detail="platform required")
+        try:
+            body, filename, content_type = await asyncio.to_thread(oss.package_file, kind)
+        except oss.OssError as exc:
+            message = str(exc)
+            status = 503 if "not configured" in message else 404
+            raise HTTPException(status_code=status, detail=message) from exc
+        return Response(
+            content=body,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Length": str(len(body)),
+                "Cache-Control": "no-store",
+            },
+        )
 
     @app.get("/api/cam")
     async def cam_info(request: Request) -> dict[str, Any]:
@@ -301,6 +474,12 @@ async def _handle_text(ws: WebSocket, raw: str) -> None:
         await _on_refresh_password(ws)
     elif kind == "connect":
         await _on_connect(ws, msg)
+    elif kind == "pair":
+        await _on_pair(ws, msg)
+    elif kind == "unpair":
+        await _on_unpair(ws, msg)
+    elif kind == "pairs":
+        await _on_pairs(ws)
     elif kind == "auth_result":
         await _on_auth_result(ws, msg)
     elif kind == "hangup":
@@ -313,13 +492,19 @@ async def _handle_text(ws: WebSocket, raw: str) -> None:
         device = registry.lookup_by_ws(ws)
         if device:
             registry.touch(device.device_id)
-        await ws.send_text(encode_json({"type": "pong", "t": msg.get("t")}))
+            _apply_info(device, msg.get("info"), _peer_ip(ws))
+        pong: dict[str, Any] = {"type": "pong", "t": msg.get("t")}
+        if device:
+            hint = update_hint(_device_version(device))
+            if hint.get("force"):
+                pong["update"] = hint
+        await ws.send_text(encode_json(pong))
     else:
         await ws.send_text(encode_json({"type": "error", "message": "unknown message"}))
 
 
 async def _on_signal(ws: WebSocket, msg: dict[str, Any], raw: str) -> None:
-    session = registry.session_for_ws(ws)
+    session = registry.resolve_session(ws, str(msg.get("session_id") or ""))
     if not session or not session.accepted:
         await ws.send_text(encode_json({"type": "error", "message": "no session"}))
         return
@@ -327,8 +512,13 @@ async def _on_signal(ws: WebSocket, msg: dict[str, Any], raw: str) -> None:
         await ws.send_text(encode_json({"type": "error", "message": "invalid signal"}))
         return
     peer = session.host_ws if ws is session.viewer_ws else session.viewer_ws
+    outbound = raw
+    if not msg.get("session_id"):
+        msg = dict(msg)
+        msg["session_id"] = session.session_id
+        outbound = encode_json(msg)
     try:
-        await peer.send_text(raw)
+        await peer.send_text(outbound)
     except Exception:
         await _end_and_notify(session.session_id, "peer_disconnected")
 
@@ -361,8 +551,9 @@ async def _on_register(ws: WebSocket, msg: dict[str, Any]) -> None:
         await ws.send_text(encode_json({"type": "error", "message": "already registered"}))
         return
     preferred = normalize_device_id(str(msg.get("device_id") or ""))
-    if preferred and len(preferred) == 9:
-        existing = registry.get(preferred)
+    claimed = registry.peek_device_id(preferred, msg.get("fingerprint"))
+    if claimed:
+        existing = registry.get(claimed)
         if existing and existing.ws is not ws:
             try:
                 await existing.ws.send_text(
@@ -381,7 +572,11 @@ async def _on_register(ws: WebSocket, msg: dict[str, Any]) -> None:
         os_name=str(msg.get("os") or ""),
         preferred_id=msg.get("device_id"),
         temp_password=msg.get("temp_password"),
+        fingerprint=msg.get("fingerprint"),
+        info=sanitize_info(msg.get("info")),
+        last_ip=_peer_ip(ws),
     )
+    _apply_info(device, msg.get("info"), device.last_ip)
     await ws.send_text(
         encode_json(
             {
@@ -389,9 +584,22 @@ async def _on_register(ws: WebSocket, msg: dict[str, Any]) -> None:
                 "device_id": device.device_id,
                 "device_id_display": format_device_id(device.device_id),
                 "temp_password": device.temp_password,
+                "update": update_hint(_device_version(device)),
+                "pairs": registry.list_pairs(device.device_id),
             }
         )
     )
+
+
+def _can_access(host: Any, *, password: str = "", viewer_id: str = "", token: str = "", trusted: bool = False) -> bool:
+    if password and constant_time_equals(password, host.temp_password):
+        return True
+    vid = normalize_device_id(viewer_id)
+    if not vid:
+        return False
+    if token and registry.pair_ok(vid, host.device_id, token):
+        return True
+    return bool(trusted and registry.is_paired(vid, host.device_id))
 
 
 async def _on_set_password(ws: WebSocket, msg: dict[str, Any]) -> None:
@@ -400,7 +608,7 @@ async def _on_set_password(ws: WebSocket, msg: dict[str, Any]) -> None:
         await ws.send_text(encode_json({"type": "error", "message": "not a host"}))
         return
     password = str(msg.get("password") or "")
-    if len(password) < 4:
+    if len(password) < 4 or not is_usable_temp_password(password):
         await ws.send_text(encode_json({"type": "error", "message": "password too short"}))
         return
     registry.set_password(device.device_id, password)
@@ -430,12 +638,18 @@ async def _on_connect(ws: WebSocket, msg: dict[str, Any]) -> None:
     if caller and caller.device_id == host.device_id:
         await ws.send_text(encode_json({"type": "auth_failed", "message": "cannot connect to self"}))
         return
-    if host.session_id or registry.session_for_ws(ws):
+    mesh_call = is_mesh_label(viewer_name)
+    viewer_sessions = [s for s in registry.sessions_for_ws(ws) if s.viewer_ws is ws]
+    if viewer_sessions and not mesh_call:
         await ws.send_text(encode_json({"type": "auth_failed", "message": "device busy"}))
         return
-    if not password or not constant_time_equals(password, host.temp_password):
+    caller_id = caller.device_id if caller else normalize_device_id(str(msg.get("from_id") or ""))
+    token = str(msg.get("token") or "")
+    if not _can_access(host, password=password, viewer_id=caller_id, token=token, trusted=bool(caller)):
         await ws.send_text(encode_json({"type": "auth_failed", "message": "wrong password"}))
         return
+    if caller_id and password:
+        registry.pair(caller_id, host.device_id)
     try:
         session = registry.create_session(
             host, ws, viewer_name, viewer_id=caller.device_id if caller else None
@@ -500,9 +714,20 @@ async def _on_auth_result(ws: WebSocket, msg: dict[str, Any]) -> None:
 
 
 async def _on_hangup(ws: WebSocket, msg: dict[str, Any]) -> None:
-    session = registry.session_for_ws(ws)
+    reason = str(msg.get("reason") or "hangup")
+    sid = str(msg.get("session_id") or "")
+    if sid:
+        session = registry.resolve_session(ws, sid)
+        if session:
+            await _end_and_notify(session.session_id, reason)
+        return
+    if reason in {"offline", "replaced"}:
+        for session in list(registry.sessions_for_ws(ws)):
+            await _end_and_notify(session.session_id, reason)
+        return
+    session = registry.resolve_session(ws, "")
     if session:
-        await _end_and_notify(session.session_id, str(msg.get("reason") or "hangup"))
+        await _end_and_notify(session.session_id, reason)
 
 
 async def _end_and_notify(session_id: str, reason: str) -> None:
@@ -541,21 +766,98 @@ async def _on_agent_result(ws: WebSocket, msg: dict[str, Any]) -> None:
         fut.set_result(msg)
 
 
+async def _on_pair(ws: WebSocket, msg: dict[str, Any]) -> None:
+    caller = registry.lookup_by_ws(ws)
+    if not caller:
+        await ws.send_text(encode_json({"type": "auth_failed", "message": "not registered"}))
+        return
+    host_id = normalize_device_id(str(msg.get("device_id") or ""))
+    password = str(msg.get("password") or "")
+    token = str(msg.get("token") or "")
+    if len(host_id) != 9 or caller.device_id == host_id:
+        await ws.send_text(encode_json({"type": "auth_failed", "message": "cannot connect to self"}))
+        return
+    if registry.pair_ok(caller.device_id, host_id, token) or registry.is_paired(caller.device_id, host_id):
+        tok = registry.pair_token(caller.device_id, host_id) or registry.pair(caller.device_id, host_id)
+        await ws.send_text(encode_json({
+            "type": "paired",
+            "device_id": host_id,
+            "device_id_display": format_device_id(host_id),
+            "token": tok,
+        }))
+        return
+    host = registry.get(host_id)
+    if not host:
+        await ws.send_text(encode_json({"type": "auth_failed", "message": "device offline"}))
+        return
+    if not password or not constant_time_equals(password, host.temp_password):
+        await ws.send_text(encode_json({"type": "auth_failed", "message": "wrong password"}))
+        return
+    tok = registry.pair(caller.device_id, host.device_id)
+    await ws.send_text(encode_json({
+        "type": "paired",
+        "device_id": host.device_id,
+        "device_id_display": format_device_id(host.device_id),
+        "token": tok,
+    }))
+
+
+async def _on_unpair(ws: WebSocket, msg: dict[str, Any]) -> None:
+    caller = registry.lookup_by_ws(ws)
+    if not caller:
+        await ws.send_text(encode_json({"type": "error", "message": "not registered"}))
+        return
+    peer_id = normalize_device_id(str(msg.get("device_id") or ""))
+    if len(peer_id) != 9:
+        await ws.send_text(encode_json({"type": "error", "message": "bad device_id"}))
+        return
+    registry.unpair(caller.device_id, peer_id)
+    peer = registry.get(peer_id)
+    if peer:
+        try:
+            await peer.ws.send_text(encode_json({
+                "type": "unpaired",
+                "device_id": caller.device_id,
+                "device_id_display": format_device_id(caller.device_id),
+            }))
+        except Exception:
+            pass
+    await ws.send_text(encode_json({
+        "type": "unpaired",
+        "device_id": peer_id,
+        "device_id_display": format_device_id(peer_id),
+    }))
+
+
+async def _on_pairs(ws: WebSocket) -> None:
+    caller = registry.lookup_by_ws(ws)
+    if not caller:
+        await ws.send_text(encode_json({"type": "error", "message": "not registered"}))
+        return
+    await ws.send_text(encode_json({"type": "pairs", "pairs": registry.list_pairs(caller.device_id)}))
+
+
 async def _dispatch_agent(body: dict[str, Any]) -> Any:
     device_id = normalize_device_id(str(body.get("device_id") or ""))
     password = str(body.get("password") or "")
+    from_id = normalize_device_id(str(body.get("from_id") or ""))
+    token = str(body.get("token") or "")
     op = str(body.get("op") or "").strip().lower()
-    if len(device_id) != 9 or not password:
+    if len(device_id) != 9 or (not password and not (from_id and token)):
         return JSONResponse({"ok": False, "error": "device_id and password required"}, status_code=400)
     if op not in AGENT_OPS:
-        return JSONResponse({"ok": False, "error": "unknown op (list/read/write/exec)"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "unknown op (list/read/write/exec/mkdir/rm/volumes)"}, status_code=400)
     content = str(body.get("content") or "")
-    if len(content.encode("utf-8")) > AGENT_MAX_CONTENT:
+    content_b64 = str(body.get("content_b64") or "")
+    if len(content.encode("utf-8")) > AGENT_MAX_CONTENT or len(content_b64) > AGENT_MAX_CONTENT:
         return JSONResponse({"ok": False, "error": "content too large"}, status_code=413)
     host = registry.get(device_id)
     if not host:
         return JSONResponse({"ok": False, "error": "device offline"}, status_code=404)
-    if not constant_time_equals(password, host.temp_password):
+    if password and constant_time_equals(password, host.temp_password):
+        if from_id:
+            registry.pair(from_id, host.device_id)
+    elif not (from_id and token and registry.pair_ok(from_id, host.device_id, token)):
         return JSONResponse({"ok": False, "error": "wrong password"}, status_code=403)
     rid = uuid.uuid4().hex
     loop = asyncio.get_running_loop()
@@ -567,8 +869,12 @@ async def _dispatch_agent(body: dict[str, Any]) -> Any:
         "op": op,
         "path": str(body.get("path") or ""),
         "content": content,
+        "content_b64": content_b64,
         "command": str(body.get("command") or ""),
         "cwd": str(body.get("cwd") or ""),
+        "offset": int(body.get("offset") or 0),
+        "length": int(body.get("length") or 0),
+        "full": True,
     }
     try:
         await host.ws.send_text(encode_json(payload))

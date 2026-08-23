@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>终端</title>
+  <link rel="stylesheet" href="/term.css" />
+</head>
+<body>
+  <header>
+    <h1>终端</h1>
+    <p id="hint">在对方电脑上执行命令，回车发送。不是交互式 SSH。Windows 上按 PowerShell 跑，pwd / ls 可用。</p>
+  </header>
+  <div id="log" class="log"></div>
+  <form id="form">
+    <span id="cwd" class="cwd">~</span>
+    <input id="cmd" type="text" autocomplete="off" spellcheck="false" placeholder="输入命令，回车执行" />
+    <button type="submit">运行</button>
+  </form>
+  <script src="/agent-client.js"></script>
+  <script src="/term.js"></script>
+</body>
+</html>

@@ -35,6 +35,8 @@ code { background: #eef3f9; padding: 1px 6px; border-radius: 4px; }
 .primary { width: 100%; margin-top: 18px; background: var(--primary); color: #fff; }
 .primary:hover { background: var(--primary-dark); }
 .ghost { background: #eef4fc; color: var(--primary); }
+html.embed .topbar { display: none; }
+html.embed .wrap { padding: 16px 20px 28px; }
 @media (max-width: 960px) {
   .home-grid { grid-template-columns: 1fr; }
   .device-id { font-size: 28px; }

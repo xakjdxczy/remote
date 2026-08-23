@@ -1,0 +1,23 @@
+html, body { margin: 0; min-height: 100%; background: #f4f7fb; color: #1b2433; font: 14px/1.45 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+header { padding: 18px 20px 8px; }
+h1 { margin: 0 0 6px; font-size: 20px; }
+header p { margin: 0; color: #66758b; font-size: 13px; }
+.list { padding: 8px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
+.hint { color: #66758b; }
+.row {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 12px 14px; border: 1px solid #e4ebf3; border-radius: 12px; background: #fff;
+}
+.row.is-progress, .row.is-warn { background: #fff8e6; }
+.row.is-live { background: #eef5ff; }
+.row.is-err { background: #fdeeee; }
+.row strong { display: block; }
+.row .hint { font-size: 12px; margin-top: 4px; }
+.row button {
+  border: 0; background: #e8f1fd; color: #2f80ed; border-radius: 8px;
+  padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; flex-shrink: 0;
+}
+.phase { display: inline-block; margin-top: 6px; font-size: 11px; border-radius: 999px; padding: 2px 8px; }
+.phase.progress, .phase.warn { background: #fff1c7; color: #9a6b00; }
+.phase.live { background: #dcebff; color: #1d6fd1; }
+.phase.err { background: #fde0e0; color: #c0392b; }

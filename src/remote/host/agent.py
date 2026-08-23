@@ -14,6 +14,8 @@ from pathlib import Path
 from remote.host.capture import now_ms, open_frame_source
 from remote.host.files import FileInbox
 from remote.host.webrtc import HostPeer
+from remote.device_fp import collect_fingerprint
+from remote.device_info import collect_info
 from remote.ids import format_device_id, generate_temp_password
 from remote.protocol import decode_json, encode_json, peek_binary_type, unpack_file_chunk, BinaryType
 
@@ -153,6 +155,8 @@ class HostAgent:
                         "os": f"{platform.system()} {platform.release()}",
                         "device_id": cfg.get("device_id"),
                         "temp_password": password,
+                        "fingerprint": collect_fingerprint(),
+                        "info": collect_info(),
                     }
                 ),
             )
@@ -191,7 +195,7 @@ class HostAgent:
     async def _heartbeat(self, ws) -> None:
         while True:
             await asyncio.sleep(15)
-            await self._send(ws, encode_json({"type": "ping", "t": now_ms()}))
+            await self._send(ws, encode_json({"type": "ping", "t": now_ms(), "info": collect_info()}))
 
     async def _stats_loop(self) -> None:
         import time
@@ -290,6 +294,10 @@ class HostAgent:
             content=str(msg.get("content") or ""),
             command=str(msg.get("command") or ""),
             cwd=str(msg.get("cwd") or ""),
+            offset=int(msg.get("offset") or 0),
+            length=int(msg.get("length") or 0),
+            content_b64=str(msg.get("content_b64") or ""),
+            full=True,
         )
         payload = {"type": "agent_result", "id": msg.get("id"), **result}
         await self._send(ws, encode_json(payload))

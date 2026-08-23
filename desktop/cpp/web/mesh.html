@@ -15,26 +15,27 @@
     </header>
     <div class="home-grid">
       <article class="card">
-        <div class="card-kicker">两台都开着尘埃X，用识别码互加。共用现有信令 / ICE / TURN。</div>
-        <div class="id-label">本机互访识别码</div>
-        <div id="mesh-id" class="device-id">------</div>
-        <div class="id-label">临时密码</div>
-        <div id="mesh-pass" class="device-id mesh-pass">------</div>
-        <div class="pass-tools">
-          <button id="mesh-online" class="ghost" type="button">上线</button>
-          <button id="mesh-offline" class="ghost" type="button">下线</button>
-          <button id="mesh-refresh-pass" class="ghost" type="button">刷新密码</button>
+        <div class="card-kicker">打开软件就会上线，关掉就下线。本机远程码在左侧栏，这里只填对方。可以同时连多台，每路一个本地端口。</div>
+        <label class="id-label" for="mesh-peer-id">对方远程码</label>
+        <div class="id-combo" id="mesh-id-combo">
+          <input id="mesh-peer-id" class="mesh-input" placeholder="123 456 789" autocomplete="off" />
+          <button type="button" class="combo-toggle" aria-label="历史连接">▾</button>
+          <div class="combo-list" hidden></div>
         </div>
-        <div class="id-label" style="margin-top:18px">连接对端</div>
-        <div class="mesh-row">
-          <input id="mesh-peer-id" class="mesh-input" placeholder="对端识别码" autocomplete="off" />
-          <input id="mesh-peer-pass" class="mesh-input" placeholder="对端密码" autocomplete="off" />
+        <label class="id-label" for="mesh-peer-pass">对方密码</label>
+        <div class="secret-wrap">
+          <input id="mesh-peer-pass" class="mesh-input" type="password" placeholder="按住查看" autocomplete="new-password" spellcheck="false" />
+          <button type="button" class="peek" id="mesh-peer-peek">查看</button>
         </div>
         <div class="pass-tools">
           <button id="mesh-connect" class="primary" type="button" style="margin-top:10px">连接对端</button>
-          <button id="mesh-hangup" class="ghost" type="button">断开</button>
+          <button id="mesh-hangup" class="ghost" type="button">断开全部</button>
         </div>
         <p id="mesh-error" class="hint mesh-error" hidden></p>
+        <div id="mesh-peers" class="mesh-peers"></div>
+        <div class="id-label" style="margin-top:18px">本地连接记录</div>
+        <p class="hint">关掉再开不会自动拨号。从这里点继续，或填识别码点连接对端。切标签不会断已建立的连接。</p>
+        <div id="mesh-recents" class="mesh-peers"></div>
       </article>
       <article class="card">
         <div class="card-kicker">互访方式（两边可以选不一样）</div>
@@ -53,6 +54,11 @@
           </span>
         </label>
         <div class="mesh-row" style="margin-top:14px">
+          <label class="mesh-field">SSH 账号
+            <input id="mesh-ssh-user" class="mesh-input" placeholder="对端登录名，可空" />
+          </label>
+        </div>
+        <div class="mesh-row">
           <label class="mesh-field">本地端口
             <input id="mesh-local-port" class="mesh-input" type="number" min="1" max="65535" value="2222" />
           </label>
@@ -76,13 +82,16 @@
         <p id="mesh-log" class="hint mesh-log"></p>
       </article>
     </div>
-    <details class="log-box" open>
+    <details class="log-box">
       <summary>运行日志</summary>
       <p id="dustx-log-path" class="hint"></p>
       <pre id="dustx-log" class="log-pre"></pre>
     </details>
   </div>
+  <script src="/shell-bridge.js"></script>
+  <script src="/ui.js"></script>
+  <script src="/recents.js?v=sharepw1"></script>
   <script src="/logs.js"></script>
-  <script src="/mesh.js"></script>
+  <script src="/mesh.js?v=linkphase1"></script>
 </body>
 </html>

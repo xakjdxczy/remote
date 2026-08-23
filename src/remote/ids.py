@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import string
 
 ID_DIGITS = 9
 PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+_MASK_PASSWORD = re.compile(r"^[•·.\-\s]+$")
 
 
 def generate_device_id(existing: set[str] | None = None) -> str:
@@ -33,6 +35,13 @@ def normalize_device_id(device_id: str) -> str:
 
 def generate_temp_password(length: int = 8) -> str:
     return "".join(secrets.choice(PASSWORD_CHARS) for _ in range(length))
+
+
+def is_usable_temp_password(password: str | None) -> bool:
+    """False for empty values or UI mask glyphs saved as the real password."""
+    if not password:
+        return False
+    return _MASK_PASSWORD.fullmatch(password) is None
 
 
 def constant_time_equals(left: str, right: str) -> bool:

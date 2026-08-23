@@ -1,6 +1,7 @@
 #include "app.hpp"
 #include "log.hpp"
 #include "server.hpp"
+#include "update.hpp"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -31,6 +32,7 @@ static int dustx_main() {
 #endif
     return 1;
   }
+  dustx::start_update_watcher();
   return dustx::run_native_app(server.port());
 }
 

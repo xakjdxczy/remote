@@ -1,5 +1,24 @@
-.mesh-pass { font-size: 28px; letter-spacing: 1px; }
 .mesh-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.id-combo, .secret-wrap { position: relative; margin-top: 6px; }
+.id-combo .mesh-input, .secret-wrap .mesh-input { width: 100%; padding-right: 42px; }
+.combo-toggle, .secret-wrap .peek {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  border: 0; background: #eef4fc; color: var(--primary);
+  border-radius: 8px; padding: 4px 8px; cursor: pointer; font: inherit; font-size: 12px;
+}
+.combo-list {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 8;
+  background: #fff; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow); max-height: 240px; overflow: auto;
+}
+.combo-item {
+  display: block; width: 100%; text-align: left; border: 0; background: transparent;
+  padding: 10px 12px; cursor: pointer; color: inherit; font: inherit;
+}
+.combo-item:hover { background: #eef4fc; }
+.combo-item strong { display: block; }
+.combo-item span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.combo-empty { padding: 12px; color: var(--muted); font-size: 13px; }
 .mesh-input {
   flex: 1;
   min-width: 140px;
@@ -25,6 +44,30 @@
 .mesh-mode em { display: block; margin-top: 4px; color: var(--muted); font-style: normal; font-size: 13px; line-height: 1.45; }
 .mesh-mode.is-disabled { opacity: 0.55; cursor: not-allowed; }
 .mesh-error { color: #c0392b; }
+.mesh-peers { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+.mesh-peer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fbff;
+}
+.mesh-peer.is-progress, .mesh-peer.is-warn { background: #fff8e6; border-color: #f0d48a; }
+.mesh-peer.is-live { background: #eef5ff; border-color: #b7d4f8; }
+.mesh-peer.is-err { background: #fdeeee; border-color: #f0b4b4; }
+.phase-tag {
+  display: inline-block; margin-top: 4px;
+  font-size: 11px; border-radius: 999px; padding: 2px 8px;
+}
+.phase-tag.progress, .phase-tag.warn { background: #fff1c7; color: #9a6b00; }
+.phase-tag.live { background: #dcebff; color: #1d6fd1; }
+.phase-tag.err { background: #fde0e0; color: #c0392b; }
+.mesh-peer strong { display: block; }
+.mesh-peer .ghost { width: auto; flex-shrink: 0; }
+.recent-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .mesh-log { white-space: pre-wrap; min-height: 3em; }
 .ssh-panel {
   margin-top: 12px;

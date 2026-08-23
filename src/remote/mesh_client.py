@@ -287,7 +287,7 @@ class MeshViewer:
             text = {
                 "device offline": "对端不在线（Windows 尘埃X 互访页需先上线）",
                 "wrong password": "密码错误",
-                "device busy": "对端正忙（同时只能有一路互访打洞）",
+                "device busy": "对端正忙（远程控制占用，或互访已满 8 路）",
                 "cannot connect to self": "不能连自己的识别码",
             }.get(str(msg.get("message") or ""), str(msg.get("message") or "连接失败"))
             self._fail = text

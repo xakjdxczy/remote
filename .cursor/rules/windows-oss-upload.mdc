@@ -1,0 +1,19 @@
+---
+description: Windows DustX OSS upload from this Mac session
+alwaysApply: true
+---
+
+# Windows 包上传 OSS
+
+不要把 zip 经互访隧道拷回 Mac 再传，除非 Windows 直传失败。
+
+1. 在 Windows 编好 `DustX-windows.zip`（用户主目录下的文件名）。
+2. 这台 Mac 签发短时 PUT（密钥不离开 Mac，预签名 URL 不打印、不进聊天）。
+3. Windows `curl` 直传 OSS 暂存对象。
+4. Mac **GET 暂存对象并算 sha256**，必须等于 Windows 本地 zip 的哈希，再写入正式对象和清单。
+5. 再 GET 正式对象和清单，sha256 / size / version 三项一致才算成功。**不以 curl 退出码或 HTTP 200 为成功。**
+6. Windows 直传失败才 `scp` 回 Mac 兜底，兜底后同样做 GET 校验。预签名 URL、AK/SK 不打印、不进聊天。
+
+```bash
+python -m remote upload-download windows --from-ssh dustx-windows:DustX-windows.zip --version <版本>
+```

@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RemoteDesk</title>
+  <title>尘埃X</title>
   <link rel="stylesheet" href="/static/css/app.css" />
+  <script>if (new URLSearchParams(location.search).get("embed") === "1") document.documentElement.classList.add("embed");</script>
 </head>
 <body>
   <div class="app">
@@ -12,8 +13,8 @@
       <div class="brand">
         <div class="logo">R</div>
         <div>
-          <div class="brand-name">RemoteDesk</div>
-          <div class="brand-sub">远程协助</div>
+          <div class="brand-name">尘埃X</div>
+          <div class="brand-sub">远程控制</div>
         </div>
       </div>
       <nav>
@@ -35,15 +36,18 @@
 
         <div class="home-grid">
           <article class="card id-card">
-            <div class="card-kicker">本机 / 演示主机</div>
-            <div class="id-label">识别码</div>
+            <div class="card-kicker">别人用这套码看你的屏幕、传文件、开终端、看摄像头或跨网互访。一台设备只有这一套。</div>
+            <div class="id-label">远程识别码</div>
             <div id="local-id" class="device-id">--- --- ---</div>
             <div class="pass-row">
               <div>
                 <div class="id-label">连接密码</div>
-                <div id="local-pass" class="password">--------</div>
+                <div id="local-pass" class="password secret-text">••••••••</div>
               </div>
-              <button id="copy-local" class="ghost">复制连接信息</button>
+              <div class="pass-actions">
+                <button type="button" class="peek" id="local-peek">查看</button>
+                <button id="copy-local" class="ghost">复制连接信息</button>
+              </div>
             </div>
             <div class="pass-tools">
               <button id="btn-refresh-pw" class="ghost" type="button">刷新密码</button>
@@ -56,19 +60,29 @@
                 </select>
               </label>
             </div>
-            <p id="local-hint" class="hint">本机远程码固定不变。默认不自动刷新密码，点「刷新密码」才会更换。</p>
+            <p id="local-hint" class="hint">密码默认隐藏，点「查看」显示。看屏幕、文件、终端、摄像头和互访都用这一套。</p>
           </article>
 
           <article class="card connect-card">
-            <div class="card-kicker">控制远程设备</div>
-            <label>对方识别码</label>
-            <input id="remote-id" maxlength="11" placeholder="123 456 789" autocomplete="off" />
-            <label>连接密码</label>
-            <input id="remote-pass" type="password" placeholder="临时密码或永久密码" />
+            <div class="card-kicker">填对方远程码和密码。点输入框或下拉可选历史连接。</div>
+            <label for="remote-id">对方远程码</label>
+            <div class="id-combo" id="remote-id-combo">
+              <input id="remote-id" maxlength="11" placeholder="123 456 789" autocomplete="off" />
+              <button type="button" class="combo-toggle" aria-label="历史连接">▾</button>
+              <div class="combo-list" hidden></div>
+            </div>
+            <label for="remote-pass">对方密码</label>
+            <div class="secret-wrap">
+              <input id="remote-pass" type="password" placeholder="按住查看" autocomplete="new-password" spellcheck="false" />
+              <button type="button" class="peek" id="remote-peek">查看</button>
+            </div>
             <label>显示名称</label>
             <input id="viewer-name" placeholder="我的电脑" />
             <button id="btn-connect" class="primary">远程控制</button>
             <p id="connect-error" class="error" hidden></p>
+            <div class="id-label" style="margin-top:18px">本地连接记录</div>
+            <p class="hint">关掉再开不会自动连。点继续即可按上次的识别码再拨。</p>
+            <div id="remote-recents" class="recents"></div>
           </article>
         </div>
       </section>
@@ -83,6 +97,7 @@
             <span id="stat-codec">编解码 --</span>
             <span id="stat-fps">-- FPS</span>
             <span id="stat-speed">0 KB/s</span>
+            <span id="stat-duration">开始 --</span>
             <span id="stat-session">本次 0 MB</span>
             <span id="stat-total">历史 0 MB</span>
             <span id="stat-rtt">延迟 -- ms</span>
@@ -102,7 +117,7 @@
             <div id="remote-cursor" class="remote-cursor hidden"></div>
             <div id="cursor-coord" class="cursor-coord hidden">0, 0</div>
           </div>
-          <div id="hosting-banner" class="hosting-banner hidden">正在共享本机画面，对方远程码见上方</div>
+          <div id="hosting-banner" class="hosting-banner hidden">正在共享本机画面</div>
           <div class="stage-hint">移动鼠标控制对方，画面上的光标与坐标为当前鼠标位置（画面走 WebRTC 视频编码）</div>
         </div>
       </section>
@@ -177,7 +192,7 @@
             <li>连接需要识别码 + 密码，密码错误会被拒绝。</li>
             <li>每个网页端都有固定远程码，既能控制别人，也能被别人控制（需同意来电并共享屏幕）。</li>
             <li>画面、键鼠、文件、聊天只走 P2P / 可选 TURN。</li>
-            <li>同一时间一台主机只接受一个控制端。</li>
+            <li>同一时间一台主机只接受一个远程控制端；跨网互访是另一套识别码，可以同时在线。</li>
             <li>本软件用于授权协助，请勿用于未授权访问。</li>
           </ul>
         </article>
@@ -196,6 +211,8 @@
       </div>
     </div>
   </div>
-  <script type="module" src="/static/js/app.js?v=cam1"></script>
+  <script src="/api/app.js"></script>
+  <script src="/static/js/ui.js"></script>
+  <script type="module" src="/static/js/app.js?v=pwstable1"></script>
 </body>
 </html>

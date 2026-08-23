@@ -17,3 +17,4 @@ This chat is the control plane. Do **not** open Cursor Remote-SSH windows (or in
 If Windows SSH asks for a password, use a one-time local dialog / `SSH_ASKPASS`; do not paste passwords into chat. Prefer installing this Mac’s public key on the remote `authorized_keys` when the user wants passwordless access.
 
 Never quote `.env/config.ini` values (OSS, SSH key, passwords).
+Never pull peer/device passwords from the VPS to drive agent or mesh. If mesh SSH is down, stop; do not `ssh dustx-vps` for `device_passwords`.

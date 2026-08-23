@@ -1,9 +1,13 @@
 #include "server.hpp"
 
 #include "agent.hpp"
+#include "device_info.hpp"
 #include "log.hpp"
 #include "net.hpp"
+#include "recents.hpp"
 #include "ssh_host.hpp"
+#include "settings.hpp"
+#include "update.hpp"
 #include "util.hpp"
 
 #include <algorithm>
@@ -93,6 +97,21 @@ std::string find_web_dir() {
   return dir + "/web";
 }
 
+std::string find_remote_ui_dir(const std::string& web) {
+  const std::string bundled = web + "/remote-ui";
+  if (!read_file(bundled + "/index.html").empty()) return bundled;
+  const char* cands[] = {
+      "/../../../src/remote/web",
+      "/../../../../src/remote/web",
+      "/../src/remote/web",
+  };
+  for (const char* rel : cands) {
+    std::string p = web + rel;
+    if (!read_file(p + "/index.html").empty()) return p;
+  }
+  return bundled;
+}
+
 bool read_http(int fd, HttpReq& req) {
   std::string raw;
   char buf[4096];
@@ -143,6 +162,8 @@ void http_reply(int fd, int code, const char* reason, const std::string& mime, c
     << "\r\nContent-Type: " << mime
     << "\r\nContent-Length: " << body.size()
     << "\r\nConnection: close"
+    << "\r\nCache-Control: no-store, no-cache, must-revalidate"
+    << "\r\nPragma: no-cache"
     << "\r\nAccess-Control-Allow-Origin: *"
     << "\r\n\r\n"
     << body;
@@ -314,19 +335,21 @@ void apply_mesh_body(Mesh& mesh, const std::string& body) {
   if (!lip.empty()) s.local_ip = lip;
   if (!pip.empty()) s.peer_ip = pip;
   const std::string id = json_get_string(body, "device_id");
-  const std::string pw = json_get_string(body, "password");
   if (!id.empty()) s.device_id = id;
-  if (!pw.empty()) s.password = pw;
+  if (body.find("\"ssh_user\"") != std::string::npos) s.ssh_user = json_get_string(body, "ssh_user");
   mesh.set_settings(s);
 }
 
 std::string mesh_start_json(Mesh& mesh, const std::string& body) {
   apply_mesh_body(mesh, body);
   std::string err;
-  const bool proxy = mesh.start_proxy(&err);
+  bool proxy = false;
   std::string tun_err;
   bool tun = false;
   const MeshSettings s = mesh.settings();
+  if (s.mode == MeshMode::Tun) {
+    proxy = mesh.start_proxy(&err);
+  }
   if (s.mode == MeshMode::Tun) {
     tun = mesh.start_tun(s.local_ip, s.peer_ip, &tun_err);
     if (!tun && tun_err.empty()) tun_err = "虚拟网卡未启动，已回退应用层隧道。";
@@ -345,7 +368,7 @@ std::string mesh_start_json(Mesh& mesh, const std::string& body) {
 
 }  // namespace
 
-Server::Server() : web_dir_(find_web_dir()) {}
+Server::Server() : web_dir_(find_web_dir()), remote_ui_dir_(find_remote_ui_dir(web_dir_)) {}
 
 Server::~Server() { stop(); }
 
@@ -461,8 +484,9 @@ void Server::handle_client(int fd) {
       close_fd(fd);
       return;
     }
-    if (req.path == "/mesh/bridge") {
-      mesh_.attach_bridge(fd);
+    if (req.path == "/mesh/bridge" || req.path.rfind("/mesh/bridge/", 0) == 0) {
+      const std::string key = req.path == "/mesh/bridge" ? "default" : req.path.substr(13);
+      mesh_.attach_bridge(fd, key);
       std::mutex mu;
       while (true) {
         int opcode = 0;
@@ -474,7 +498,7 @@ void Server::handle_client(int fd) {
           continue;
         }
         if (opcode != 2 || payload.empty()) continue;
-        mesh_.on_bridge_bytes(reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
+        mesh_.on_bridge_bytes(fd, reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
       }
       mesh_.detach_bridge(fd);
       close_fd(fd);
@@ -505,11 +529,73 @@ void Server::handle_client(int fd) {
     vio_.stop();
     http_reply(fd, 200, "OK", "application/json; charset=utf-8",
                "{\"ok\":true,\"running\":false,\"message\":\"已停止虚拟设备输出\"}");
+  } else if (req.path == "/api/app.js" && req.method == "GET") {
+    std::ostringstream o;
+    o << "window.DUSTX_SIGNAL_HTTP=" << '"' << json_escape(signaling_http_origin()) << '"'
+      << ";window.DUSTX_SIGNAL_WS=" << '"' << json_escape(signaling_ws_url()) << '"' << ";\n";
+    http_reply(fd, 200, "OK", "application/javascript; charset=utf-8", o.str());
+  } else if (req.path == "/api/recents" && req.method == "GET") {
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", load_connections_json());
+  } else if (req.path == "/api/recents" && req.method == "POST") {
+    std::string err;
+    const bool ok = upsert_connection(req.body, &err);
+    std::ostringstream rec;
+    rec << "{\"ok\":" << (ok ? "true" : "false");
+    if (!err.empty()) rec << ",\"error\":\"" << json_escape(err) << "\"";
+    rec << "}";
+    http_reply(fd, ok ? 200 : 400, ok ? "OK" : "Bad Request", "application/json; charset=utf-8", rec.str());
+  } else if (req.path == "/api/recents/remove" && req.method == "POST") {
+    std::string err;
+    const bool ok = remove_connection(req.body, &err);
+    std::ostringstream rec;
+    rec << "{\"ok\":" << (ok ? "true" : "false");
+    if (!err.empty()) rec << ",\"error\":\"" << json_escape(err) << "\"";
+    rec << "}";
+    http_reply(fd, ok ? 200 : 400, ok ? "OK" : "Bad Request", "application/json; charset=utf-8", rec.str());
+  } else if (req.path == "/api/app" && req.method == "GET") {
+    std::string remote = remote_console_url();
+    if (remote.find("embed=") == std::string::npos) {
+      remote += (remote.find('?') == std::string::npos) ? "?embed=1" : "&embed=1";
+    }
+    std::ostringstream o;
+    o << "{\"ok\":true,\"remote_url\":\"" << json_escape(remote)
+      << "\",\"signal_ws\":\"" << json_escape(signaling_ws_url())
+      << "\",\"signal_http\":\"" << json_escape(signaling_http_origin())
+      << "\",\"version\":\"" << json_escape(app_version()) << "\""
+      << ",\"use_system_proxy\":" << (use_system_proxy() ? "true" : "false") << "}";
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", o.str());
+  } else if (req.path == "/api/settings" && req.method == "GET") {
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", settings_json());
+  } else if (req.path == "/api/settings" && req.method == "POST") {
+    apply_settings_body(req.body);
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", settings_json());
+  } else if (req.path == "/api/update" && req.method == "GET") {
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", check_update_json());
+  } else if (req.path == "/api/update/status" && req.method == "GET") {
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", update_status_json());
+  } else if (req.path == "/api/update/apply" && req.method == "POST") {
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8",
+               apply_update_json(json_get_bool(req.body, "force", false)));
+  } else if (req.path == "/api/device" && req.method == "GET") {
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", device_info_json());
   } else if (req.path == "/api/mesh" && req.method == "GET") {
     http_reply(fd, 200, "OK", "application/json; charset=utf-8", with_ssh(mesh_.status_json()));
   } else if (req.path == "/api/mesh" && req.method == "POST") {
     apply_mesh_body(mesh_, req.body);
     http_reply(fd, 200, "OK", "application/json; charset=utf-8", with_ssh(mesh_.status_json()));
+  } else if (req.path == "/api/mesh/peer" && req.method == "POST") {
+    const std::string key = json_get_string(req.body, "key");
+    const int port = json_get_int(req.body, "local_port", 0);
+    std::string err;
+    const bool ok = mesh_.add_peer(key, port, &err);
+    std::ostringstream o;
+    o << "{\"ok\":" << (ok ? "true" : "false");
+    if (!err.empty()) o << ",\"error\":\"" << json_escape(err) << "\"";
+    o << ",\"key\":\"" << json_escape(key) << "\",\"local_port\":" << port << "}";
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", o.str());
+  } else if (req.path == "/api/mesh/peer/stop" && req.method == "POST") {
+    mesh_.remove_peer(json_get_string(req.body, "key"));
+    http_reply(fd, 200, "OK", "application/json; charset=utf-8", "{\"ok\":true}");
   } else if (req.path == "/api/mesh/start" && req.method == "POST") {
     http_reply(fd, 200, "OK", "application/json; charset=utf-8", mesh_start_json(mesh_, req.body));
   } else if (req.path == "/api/mesh/stop" && req.method == "POST") {
@@ -540,15 +626,18 @@ void Server::handle_client(int fd) {
     http_reply(fd, 200, "OK", "application/json; charset=utf-8", with_ssh(mesh_.status_json()));
   } else if (req.method == "GET") {
     std::string rel = req.path;
-    if (rel == "/") rel = "/cam.html";
+    if (rel == "/") rel = "/shell.html";
     if (rel.find("..") != std::string::npos) {
       http_reply(fd, 400, "Bad Request", "text/plain", "bad path");
     } else {
-      std::string body = read_file(web_dir_ + rel);
+      std::string file = web_dir_ + rel;
+      if (rel == "/remote.html") file = remote_ui_dir_ + "/index.html";
+      else if (rel.rfind("/static/", 0) == 0) file = remote_ui_dir_ + rel.substr(7);
+      std::string body = read_file(file);
       if (body.empty()) {
         http_reply(fd, 404, "Not Found", "text/plain; charset=utf-8", "not found");
       } else {
-        http_reply(fd, 200, "OK", mime_for(rel), body);
+        http_reply(fd, 200, "OK", mime_for(rel == "/remote.html" ? std::string(".html") : rel), body);
       }
     }
   } else {

@@ -21,6 +21,7 @@ class Server {
   Mesh& mesh() { return mesh_; }
   VirtualIO& virtual_io() { return vio_; }
   const std::string& web_dir() const { return web_dir_; }
+  const std::string& remote_ui_dir() const { return remote_ui_dir_; }
 
  private:
   void accept_loop();
@@ -34,6 +35,7 @@ class Server {
   Mesh mesh_;
   VirtualIO vio_;
   std::string web_dir_;
+  std::string remote_ui_dir_;
 };
 
 }  // namespace dustx

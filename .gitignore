@@ -36,6 +36,7 @@ desktop/mac/*.app/
 desktop/windows/尘埃X/
 desktop/windows/DustX/
 desktop/windows/*.exe
+desktop/cpp/build-*/
 
 # RemoteDesk
 .remotedesk/

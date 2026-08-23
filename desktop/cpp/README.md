@@ -2,9 +2,11 @@
 
 双击运行，不需要安装 Python。窗口里是：
 
-- **远程控制**：打开官网控制台（默认 `https://117.72.108.246/remote/`）
-- **手机摄像头**：本机 HTTP/WebSocket 配对服务，只走局域网或 USB
-- **跨网互访**：两台尘埃X 用识别码互加。默认应用层隧道（`127.0.0.1:2222` → 对端 `:22`）；Windows 可选 Wintun 虚拟网卡。Mac 没有项目自己的 Network Extension 许可时，「虚拟网卡」不可用。云端可用 `python -m remote mesh` 走同一条打洞隧道，或 `python -m remote agent` 走不占 P2P 的应用协议（主机上线后，信令 `POST /api/agent` → 本机 `POST /api/agent/run`）。
+- **远程控制**：本机页面注册到官网信令（默认 `https://117.72.108.246`），看屏幕 / 键鼠
+- **跨网互访**：另一套识别码，打开即上线。应用层隧道可同时连多台（每路一个本地端口，默认从 `2222` 起）。Windows 可选 Wintun 虚拟网卡（同时只能一路）。Mac 没有项目自己的 Network Extension 许可时，「虚拟网卡」不可用
+- **手机摄像头**：本机 HTTP/WebSocket 配对，只走局域网或 USB
+
+三块面板常驻，切页不会把另外两边踢下线。远程控制和互访可以同时连同一台电脑（两套码，两条 P2P）。云端可用 `python -m remote mesh` 走同一条打洞隧道，或 `python -m remote agent` 走不占 P2P 的应用协议（主机上线后，信令 `POST /api/agent` → 本机 `POST /api/agent/run`）。
 
 手机 App 协议不变：`dustcam://ip:port/token`，`/cam/ws` 的 `hello` / `signal` / `ready`。
 

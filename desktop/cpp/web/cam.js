@@ -6,10 +6,38 @@ const cam = {
   ice: [],
   transport: "wifi",
   pumping: false,
+  startedAt: 0,
 };
 
 function camEl(id) {
   return document.getElementById(id);
+}
+
+function rememberCam(extra) {
+  if (!window.dustxRecents) return;
+  window.dustxRecents.upsert("cam", Object.assign({
+    id: cam.transport || "wifi",
+    transport: cam.transport || "wifi",
+    want: true,
+  }, extra || {})).catch(() => {});
+}
+
+function applyCamTransport(transport) {
+  cam.transport = transport === "usb" ? "usb" : "wifi";
+  rememberCam();
+  refreshCamInfo();
+}
+
+function notifyCam() {
+  if (typeof dustxNotifyShell !== "function") return;
+  const pill = camEl("cam-status");
+  dustxNotifyShell({
+    channel: "cam",
+    status: pill ? pill.textContent : "",
+    cls: pill ? String(pill.className).replace("pill", "").trim() : "",
+    id: cam.token || "",
+    idDisplay: camEl("cam-token")?.textContent || cam.token || "",
+  });
 }
 
 function setCamStatus(text, cls) {
@@ -17,6 +45,7 @@ function setCamStatus(text, cls) {
   if (!pill) return;
   pill.textContent = text;
   pill.className = `pill ${cls || ""}`;
+  notifyCam();
 }
 
 function camWsUrl(path) {
@@ -30,6 +59,7 @@ async function refreshCamInfo() {
   cam.token = data.token;
   cam.ice = data.ice_servers || [];
   camEl("cam-token").textContent = data.token;
+  notifyCam();
   const ips = (data.ips || []).join("  ") || "（未发现局域网 IP，请用 USB / 127.0.0.1）";
   camEl("cam-ips").textContent = ips;
   camEl("cam-usb-cmd").textContent = data.usb?.adb_reverse || "";
@@ -71,6 +101,7 @@ async function connectCamDesktop() {
     }
     if (msg.type === "ready") {
       setCamStatus("手机已接入，正在拉流", "busy");
+      rememberCam();
       startCamOffer();
     }
     if (msg.type === "signal" && msg.kind === "answer") {
@@ -79,6 +110,13 @@ async function connectCamDesktop() {
     }
     if (msg.type === "peer_left") {
       setCamStatus("手机已断开", "");
+      if (cam.startedAt) {
+        rememberCam({
+          started_at: Math.floor(cam.startedAt / 1000),
+          ended_at: Math.floor(Date.now() / 1000),
+        });
+        cam.startedAt = 0;
+      }
       teardownCamPeer();
     }
   };
@@ -98,6 +136,11 @@ async function startCamOffer() {
     if (video.srcObject !== ev.streams[0]) video.srcObject = ev.streams[0];
     video.play().catch(() => {});
     setCamStatus("已连接", "online");
+    if (!cam.startedAt) cam.startedAt = Date.now();
+    rememberCam({
+      started_at: Math.floor(cam.startedAt / 1000),
+      ended_at: 0,
+    });
   };
   pc.oniceconnectionstatechange = () => {
     if (pc.iceConnectionState === "failed") setCamStatus("ICE 失败", "");
@@ -248,18 +291,25 @@ async function prepareUsbAdb() {
   }
 }
 
-camEl("cam-mode-wifi")?.addEventListener("click", () => {
-  cam.transport = "wifi";
-  refreshCamInfo();
-});
-camEl("cam-mode-usb")?.addEventListener("click", () => {
-  cam.transport = "usb";
-  refreshCamInfo();
-});
+camEl("cam-mode-wifi")?.addEventListener("click", () => applyCamTransport("wifi"));
+camEl("cam-mode-usb")?.addEventListener("click", () => applyCamTransport("usb"));
 camEl("cam-rotate")?.addEventListener("click", () => rotateCamToken());
 camEl("cam-wait")?.addEventListener("click", () => connectCamDesktop());
 camEl("cam-adb")?.addEventListener("click", () => prepareUsbAdb());
 camEl("cam-sink")?.addEventListener("click", () => startCamSink());
-refreshCamInfo().then(() => connectCamDesktop()).catch((err) => {
-  setCamStatus(String(err), "");
+window.addEventListener("message", (ev) => {
+  const msg = ev.data;
+  if (!msg || msg.source !== "dustx-shell" || msg.action !== "resume" || msg.kind !== "cam") return;
+  applyCamTransport(msg.item?.transport || cam.transport);
+  connectCamDesktop();
 });
+(async () => {
+  try {
+    const doc = await window.dustxRecents?.load();
+    const last = (doc?.cam || [])[0];
+    if (last?.transport) cam.transport = last.transport === "usb" ? "usb" : "wifi";
+  } catch { /* ignore */ }
+  refreshCamInfo().then(() => connectCamDesktop()).catch((err) => {
+    setCamStatus(String(err), "");
+  });
+})();

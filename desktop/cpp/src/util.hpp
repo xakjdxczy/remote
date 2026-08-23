@@ -9,6 +9,10 @@ namespace dustx {
 std::string json_escape(const std::string& s);
 std::string json_get_string(const std::string& json, const std::string& key);
 int json_get_int(const std::string& json, const std::string& key, int fallback);
+bool json_get_bool(const std::string& json, const std::string& key, bool fallback);
+long long json_get_ll(const std::string& json, const std::string& key, long long fallback);
+std::string base64_encode(const std::string& data);
+std::string base64_decode(const std::string& data);
 std::string signaling_ws_url();
 std::string signaling_http_origin();
 std::string ice_servers_json();

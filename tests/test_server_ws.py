@@ -38,6 +38,16 @@ def test_config_allows_desktop_origin(monkeypatch):
     assert cfg.headers.get("access-control-allow-origin") in {"*", "http://127.0.0.1:18790"}
 
 
+def test_app_js_and_iframe_header(monkeypatch):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    client = TestClient(create_app())
+    js = client.get("/api/app.js")
+    assert js.status_code == 200
+    assert "DUSTX_SIGNAL_HTTP" in js.text
+    page = client.get("/")
+    assert page.headers.get("content-security-policy") == "frame-ancestors *"
+
+
 def test_register_connect_and_signal_only(monkeypatch):
     monkeypatch.setattr(server_mod, "registry", Registry())
     client = TestClient(create_app())
@@ -193,3 +203,72 @@ def test_host_can_reject_incoming_call(monkeypatch):
         ended = viewer.receive_json()
         assert ended["type"] == "session_end"
         assert ended["reason"] == "rejected"
+
+
+def test_mesh_host_accepts_two_viewers(monkeypatch):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    client = TestClient(create_app())
+    with client.websocket_connect("/ws") as host, client.websocket_connect("/ws") as a, client.websocket_connect("/ws") as b:
+        host.send_json({
+            "type": "register",
+            "hostname": "pc-a",
+            "os": "macOS",
+            "device_id": "555666777",
+            "temp_password": "passw0rd",
+        })
+        assert host.receive_json()["type"] == "registered"
+        a.send_json({"type": "connect", "device_id": "555666777", "password": "passw0rd", "name": "尘埃X-mesh"})
+        assert a.receive_json()["type"] == "call_pending"
+        incoming_a = host.receive_json()
+        host.send_json({"type": "auth_result", "session_id": incoming_a["session_id"], "ok": True})
+        assert host.receive_json()["type"] == "session_start"
+        assert a.receive_json()["type"] == "session_start"
+        b.send_json({"type": "connect", "device_id": "555666777", "password": "passw0rd", "name": "尘埃X-mesh"})
+        pending_b = b.receive_json()
+        assert pending_b["type"] == "call_pending"
+        incoming_b = host.receive_json()
+        assert incoming_b["type"] == "incoming_call"
+        host.send_json({"type": "auth_result", "session_id": incoming_b["session_id"], "ok": True})
+        assert host.receive_json()["type"] == "session_start"
+        assert b.receive_json()["type"] == "session_start"
+        a.send_json({"type": "signal", "session_id": incoming_a["session_id"], "kind": "offer", "sdp": {"type": "offer", "sdp": "v=0"}})
+        forwarded = host.receive_json()
+        assert forwarded["session_id"] == incoming_a["session_id"]
+        assert forwarded["kind"] == "offer"
+
+
+def test_one_code_allows_mesh_and_remote(monkeypatch):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    client = TestClient(create_app())
+    with client.websocket_connect("/ws") as host, client.websocket_connect("/ws") as mesh, client.websocket_connect("/ws") as remote:
+        host.send_json({
+            "type": "register",
+            "hostname": "MacBook",
+            "os": "macOS",
+            "device_id": "555666777",
+            "temp_password": "passw0rd",
+        })
+        assert host.receive_json()["type"] == "registered"
+        mesh.send_json({"type": "connect", "device_id": "555666777", "password": "passw0rd", "name": "尘埃X-mesh"})
+        assert mesh.receive_json()["type"] == "call_pending"
+        incoming_mesh = host.receive_json()
+        host.send_json({"type": "auth_result", "session_id": incoming_mesh["session_id"], "ok": True})
+        assert host.receive_json()["type"] == "session_start"
+        assert mesh.receive_json()["type"] == "session_start"
+        remote.send_json({"type": "connect", "device_id": "555666777", "password": "passw0rd", "name": "alice"})
+        assert remote.receive_json()["type"] == "call_pending"
+        incoming_remote = host.receive_json()
+        assert incoming_remote["type"] == "incoming_call"
+        assert incoming_remote["viewer_name"] == "alice"
+        host.send_json({"type": "auth_result", "session_id": incoming_remote["session_id"], "ok": True})
+        assert host.receive_json()["type"] == "session_start"
+        assert remote.receive_json()["type"] == "session_start"
+        remote.send_json({
+            "type": "signal",
+            "session_id": incoming_remote["session_id"],
+            "kind": "offer",
+            "sdp": {"type": "offer", "sdp": "v=0"},
+        })
+        forwarded = host.receive_json()
+        assert forwarded["session_id"] == incoming_remote["session_id"]
+        assert forwarded["kind"] == "offer"

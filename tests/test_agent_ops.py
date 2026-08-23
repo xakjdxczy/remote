@@ -47,3 +47,37 @@ def test_resolve_stays_in_root(tmp_path, monkeypatch):
 
 def test_unknown_op():
     assert run_agent("delete")["ok"] is False
+
+
+def test_mkdir_rm_and_chunk(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUSTX_AGENT_ROOT", str(tmp_path))
+    made = run_agent("mkdir", path="box")
+    assert made["ok"] is True
+    payload = b"dustx-chunk-" + (b"x" * 4000)
+    b64 = __import__("base64").b64encode(payload).decode("ascii")
+    wrote = run_agent("write", path="box/a.bin", content_b64=b64, offset=0)
+    assert wrote["ok"] is True
+    chunk = run_agent("read", path="box/a.bin", offset=0, length=12)
+    assert chunk["ok"] is True
+    assert __import__("base64").b64decode(chunk["content_b64"]) == b"dustx-chunk-"
+    gone = run_agent("rm", path="box")
+    assert gone["ok"] is True
+    assert not (tmp_path / "box").exists()
+
+
+def test_full_disk_reads_absolute(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUSTX_AGENT_ROOT", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("seen", encoding="utf-8")
+    assert run_agent("read", path=str(outside))["ok"] is False
+    got = run_agent("read", path=str(outside), full=True)
+    assert got["ok"] is True
+    assert got["content"] == "seen"
+
+
+def test_volumes_lists_something():
+    data = run_agent("volumes")
+    assert data["ok"] is True
+    assert data["entries"]
+    assert any(e.get("dir") for e in data["entries"])

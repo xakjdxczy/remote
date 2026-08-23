@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>文件传输</title>
+  <link rel="stylesheet" href="/files.css" />
+</head>
+<body>
+  <header>
+    <h1 id="title">文件传输</h1>
+    <p>左侧是这台电脑，右侧是对方。把文件拖到另一边即可复制，也可以从访达 / 资源管理器拖进来。</p>
+  </header>
+  <div class="panes">
+    <section class="pane" data-side="local">
+      <div class="pane-head">
+        <strong>这台电脑</strong>
+        <span class="crumb" data-crumb="local"></span>
+        <button type="button" data-up="local">上级</button>
+      </div>
+      <div class="pane-tools">
+        <button type="button" data-home="local">主目录</button>
+        <button type="button" data-vols="local">磁盘</button>
+        <button type="button" data-mkdir="local">新建文件夹</button>
+        <button type="button" data-rm="local">删除</button>
+      </div>
+      <ul class="list" id="list-local"></ul>
+    </section>
+    <section class="pane" data-side="remote">
+      <div class="pane-head">
+        <strong>对方</strong>
+        <span class="crumb" data-crumb="remote"></span>
+        <button type="button" data-up="remote">上级</button>
+      </div>
+      <div class="pane-tools">
+        <button type="button" data-home="remote">主目录</button>
+        <button type="button" data-vols="remote">磁盘</button>
+        <button type="button" data-mkdir="remote">新建文件夹</button>
+        <button type="button" data-rm="remote">删除</button>
+      </div>
+      <ul class="list" id="list-remote"></ul>
+    </section>
+  </div>
+  <div class="status" id="status">准备就绪</div>
+  <script src="/agent-client.js"></script>
+  <script src="/files.js"></script>
+</body>
+</html>
