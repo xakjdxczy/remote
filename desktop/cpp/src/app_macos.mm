@@ -3,6 +3,7 @@
 #import <WebKit/WebKit.h>
 
 #include "app.hpp"
+#include "log.hpp"
 #include "settings.hpp"
 #include "update.hpp"
 #include "util.hpp"
@@ -15,6 +16,7 @@
 @property(nonatomic, strong) NSMutableArray<NSWindow*>* extras;
 @property(nonatomic, assign) int port;
 @property(nonatomic, assign) BOOL allowClose;
+@property(nonatomic, assign) BOOL loadAlerted;
 @end
 
 static void apply_store_proxy(WKWebsiteDataStore* store, bool use_system) {
@@ -192,9 +194,39 @@ static void apply_store_proxy(WKWebsiteDataStore* store, bool use_system) {
   return YES;
 }
 
+- (void)showLoadError:(NSString*)detail {
+  if (self.loadAlerted) return;
+  self.loadAlerted = YES;
+  dustx::log_error("webview", std::string("页面打开失败 ") + (detail ? detail.UTF8String : ""));
+  dustx::alert_error(std::string("无法打开本机界面，窗口会是白屏。\n") + (detail ? detail.UTF8String : "") +
+                     "\n\n日志：" + dustx::log_file_path());
+}
+
+- (void)webView:(WKWebView*)webView didFailProvisionalNavigation:(WKNavigation*)navigation withError:(NSError*)error {
+  (void)webView;
+  (void)navigation;
+  [self showLoadError:error.localizedDescription];
+}
+
+- (void)webView:(WKWebView*)webView didFailNavigation:(WKNavigation*)navigation withError:(NSError*)error {
+  (void)webView;
+  (void)navigation;
+  [self showLoadError:error.localizedDescription];
+}
+
 @end
 
 namespace dustx {
+
+void alert_error(const std::string& text) {
+  @autoreleasepool {
+    NSAlert* alert = [NSAlert new];
+    alert.alertStyle = NSAlertStyleCritical;
+    alert.messageText = @"尘埃X";
+    alert.informativeText = [NSString stringWithUTF8String:text.c_str()] ?: @"";
+    [alert runModal];
+  }
+}
 
 int run_native_app(int port) {
   @autoreleasepool {

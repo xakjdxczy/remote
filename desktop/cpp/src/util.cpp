@@ -348,6 +348,10 @@ int default_listen_port() {
 }
 
 #ifdef _WIN32
+void alert_error(const std::string& text) {
+  MessageBoxW(nullptr, utf8_to_wide(text).c_str(), L"尘埃X", MB_OK | MB_ICONERROR);
+}
+
 std::wstring utf8_to_wide(const std::string& s) {
   if (s.empty()) return L"";
   int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), nullptr, 0);

@@ -48,6 +48,7 @@ def test_presence_includes_info_and_ip(monkeypatch):
                 "os": "Microsoft Windows 11 家庭中文版",
                 "gpu": "NVIDIA GeForce RTX 4070 Laptop GPU",
                 "board": "8BAB",
+                "version": "2026.8.23.6",
             },
         })
         assert host.receive_json()["type"] == "registered"
@@ -55,6 +56,8 @@ def test_presence_includes_info_and_ip(monkeypatch):
         row = data["devices"]["123123123"]
         assert row["online"] is True
         assert row["hostname"] == "CZHYORPC"
+        assert row["version"] == "2026.8.23.6"
         assert row["info"]["cpu"].startswith("13th Gen")
         assert row["info"]["board"] == "8BAB"
+        assert row["info"]["version"] == "2026.8.23.6"
         assert "ip" in row

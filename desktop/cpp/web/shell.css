@@ -160,6 +160,10 @@ button { font: inherit; }
 .device-row .kicker { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .device-row .tag { font-size: 11px; color: var(--primary); background: #e8f1fd; border-radius: 999px; padding: 2px 8px; }
 .device-aside { display: flex; align-items: center; gap: 8px; }
+.device-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.device-ver {
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 .device-del {
   border: 0; background: transparent; color: var(--muted);
   font: inherit; font-size: 12px; cursor: pointer; padding: 2px 4px;

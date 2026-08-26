@@ -125,14 +125,17 @@ def update_payload(platform: str, current: str = "") -> dict[str, Any]:
         pkg = oss.download_payload(kind)
     except oss.OssError as exc:
         payload["error"] = str(exc)
-        if payload["force"]:
-            payload["ok"] = True
+        payload["force"] = False
         return payload
     latest = str(pkg.get("version") or "")
     required = hint["required"] or latest
     newer = bool(current and latest and version_less(current, latest))
     # A stale required (e.g. still 6 after 8 was published) must not block force.
-    package_ready = bool(not hint["required"] or not version_less(latest, hint["required"]))
+    package_ready = bool(
+        pkg.get("url")
+        and pkg.get("size")
+        and (not hint["required"] or not version_less(latest, hint["required"]))
+    )
     must = bool(policy.get("force") and newer and package_ready)
     sha = pkg.get("sha256")
     # Windows clients before 2026.8.21.9 parse `certutil` as "256" and always fail checksum.

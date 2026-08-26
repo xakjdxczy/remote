@@ -6,13 +6,30 @@ const state = {
   password: String(params.get("password") || ""),
   fromId: String(params.get("from") || "").replace(/\D/g, ""),
   token: String(params.get("token") || ""),
-  full: params.get("full") === "1",
   localOnly: params.get("local") === "1",
-  local: { path: "", entries: [], sel: null, volumes: false },
-  remote: { path: "", entries: [], sel: null, volumes: false },
+  local: { path: "", home: "", entries: [], sel: null, volumes: false },
+  remote: { path: "", home: "", entries: [], sel: null, volumes: false },
 };
 
 function $(sel) { return document.querySelector(sel); }
+
+function normPath(p) {
+  return String(p || "").replace(/[\\/]+$/, "").toLowerCase();
+}
+
+function looksLikeHome(p) {
+  const s = String(p || "").replace(/[\\/]+$/, "");
+  if (!s) return true;
+  if (/^\/Users\/[^/]+$/.test(s) || /^\/home\/[^/]+$/.test(s)) return true;
+  if (/^[A-Za-z]:\\Users\\[^\\]+$/.test(s)) return true;
+  return false;
+}
+
+function atHome(pane) {
+  if (!pane || pane.volumes) return false;
+  if (pane.home && normPath(pane.path) === normPath(pane.home)) return true;
+  return looksLikeHome(pane.path);
+}
 
 function fmtSize(n) {
   n = Number(n) || 0;
@@ -41,7 +58,7 @@ function render(side) {
   const pane = state[side];
   const list = $(`#list-${side}`);
   const crumb = $(`[data-crumb="${side}"]`);
-  crumb.textContent = pane.volumes ? "磁盘" : (pane.path || "主目录");
+  crumb.textContent = pane.volumes ? "磁盘" : (atHome(pane) ? "主目录" : (pane.path || "主目录"));
   const rows = pane.entries || [];
   if (!rows.length) {
     list.innerHTML = "<li><span></span><span class=\"name\">空文件夹</span></li>";
@@ -63,13 +80,19 @@ async function loadDir(side, path, volumes) {
   pane.sel = null;
   const data = volumes
     ? await run(side, { op: "volumes" })
-    : await run(side, { op: "list", path: path || "", full: true });
+    : await run(side, { op: "list", path: path || "", home: !path, full: !!path });
   if (!data.ok) {
+    pane.entries = [];
+    pane.path = path || "";
+    render(side);
+    const list = $(`#list-${side}`);
+    if (list) list.innerHTML = `<li><span></span><span class="name">${data.error || "无法列出目录"}</span></li>`;
     setStatus(data.error || "无法列出目录", true);
     return;
   }
   pane.volumes = !!volumes;
   pane.path = volumes ? "" : (data.path || path || "");
+  if (!volumes && (data.home || !path || looksLikeHome(pane.path))) pane.home = pane.path || pane.home;
   pane.entries = (data.entries || []).map((e) => ({
     name: e.name,
     dir: !!e.dir,
@@ -77,7 +100,7 @@ async function loadDir(side, path, volumes) {
     path: e.path || A.joinPath(pane.path, e.name),
   }));
   render(side);
-  setStatus(`${side === "local" ? "这台电脑" : "对方"} · ${pane.volumes ? "磁盘" : pane.path}`);
+  setStatus(`${side === "local" ? "这台电脑" : "对方"} · ${pane.volumes ? "磁盘" : (atHome(pane) ? "主目录" : pane.path)}`);
 }
 
 async function enter(side, item) {
@@ -236,7 +259,12 @@ document.addEventListener("click", async (ev) => {
   if (!side) return;
   if (up) {
     if (state[side].volumes) return;
+    if (atHome(state[side])) return;
     const parent = A.parentPath(state[side].path);
+    if (!parent || (state[side].home && normPath(parent) === normPath(A.parentPath(state[side].home)))) {
+      await loadDir(side, state[side].home || "", false);
+      return;
+    }
     if (!parent) await loadDir(side, "", true);
     else await loadDir(side, parent, false);
     return;
@@ -277,12 +305,27 @@ async function boot() {
     const app = await (await fetch("/api/app")).json();
     state.signalHttp = app.signal_http || "";
   } catch { /* ignore */ }
-  if (state.full) document.getElementById("title").textContent = "文件中心";
-  if (state.localOnly) {
-    document.querySelector("[data-side=remote] .pane-head strong").textContent = "这台电脑（另一栏）";
+  if (!state.signalHttp) state.signalHttp = "https://117.72.108.246";
+  if (!state.fromId) {
+    try {
+      const mesh = await (await fetch("/api/mesh")).json();
+      state.fromId = String(mesh.device_id || "").replace(/\D/g, "");
+    } catch { /* ignore */ }
   }
-  await loadDir("local", "", !!state.full);
-  await loadDir("remote", "", !!state.full);
+  if (state.localOnly) {
+    setStatus("文件传输是在本机和对方之间拷文件，请先选一台已连接的设备。", true);
+    return;
+  }
+  if (!state.deviceId) {
+    setStatus("没有对方识别码", true);
+    return;
+  }
+  if (!state.password && !state.token) {
+    setStatus("还没连接这台设备", true);
+    return;
+  }
+  await loadDir("local", "", false);
+  await loadDir("remote", "", false);
 }
 
 bindList("local");

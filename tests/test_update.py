@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from remote.server.api import create_app
+from remote.server.oss import OssError
 from remote.server.update import load_policy, save_policy, update_hint, update_payload
 from remote.versioning import version_less
 
@@ -139,6 +140,20 @@ def test_same_version_clears_force_and_notes(monkeypatch):
     assert data["force"] is False
     assert data["latest"] == "2026.8.21.8"
     assert not data.get("notes")
+
+
+def test_missing_package_never_forces(monkeypatch):
+    monkeypatch.setenv("DUSTX_UPDATE_POLICY", "memory")
+    save_policy(force=True, version="2026.8.26.2")
+
+    def boom(_kind: str):
+        raise OssError("windows package is missing")
+
+    monkeypatch.setattr("remote.server.oss.download_payload", boom)
+    data = update_payload("windows", "2026.8.26.1")
+    assert data["ok"] is False
+    assert data["force"] is False
+    assert "url" not in data or not data.get("url")
 
 
 def test_official_update_endpoint(monkeypatch):

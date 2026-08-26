@@ -22,6 +22,7 @@ class Server {
   VirtualIO& virtual_io() { return vio_; }
   const std::string& web_dir() const { return web_dir_; }
   const std::string& remote_ui_dir() const { return remote_ui_dir_; }
+  bool has_shell_ui() const;
 
  private:
   void accept_loop();

@@ -365,8 +365,10 @@ function runTool(tool) {
   if (dev.kind === "self") {
     if (tool === "remote") return showPanel("remote");
     if (tool === "mesh") return showPanel("mesh");
-    if (tool === "files") return openToolWindow("/files.html?local=1", "dustx-files");
-    if (tool === "center") return openToolWindow("/files.html?local=1&full=1", "dustx-center");
+    if (tool === "files") {
+      showBanner("文件传输是在本机和对方之间拷文件，请先选一台已连接的设备。");
+      return;
+    }
     if (tool === "term") return openToolWindow("/term.html?local=1", "dustx-term");
     if (tool === "camera") return openToolWindow("/webcam.html", "dustx-webcam");
     return;
@@ -406,14 +408,13 @@ function runTool(tool) {
     }
     return openToolWindow(`/remote.html?embed=1&mode=camera&viewer=1&${qs({ id: dev.id, password: auth.password, token: auth.token, from: auth.from })}`, "dustx-camera");
   }
-  if (tool === "files" || tool === "center") {
+  if (tool === "files") {
     const auth = pairAuth(dev);
     if (!auth.password && !auth.token) {
       showBanner("先连接这台设备。");
       return;
     }
-    const full = tool === "center" ? "1" : "";
-    return openToolWindow(`/files.html?${qs({ id: dev.id, password: auth.password, token: auth.token, from: auth.from, full })}`, tool === "center" ? "dustx-center" : "dustx-files");
+    return openToolWindow(`/files.html?${qs({ id: dev.id, password: auth.password, token: auth.token, from: auth.from })}`, "dustx-files");
   }
   if (tool === "term") {
     const auth = pairAuth(dev);
@@ -439,6 +440,8 @@ function syncTools() {
     return;
   }
   $all("[data-tool]").forEach((btn) => { btn.disabled = false; });
+  const filesBtn = $('[data-tool="files"]');
+  if (filesBtn && (dev.kind === "self" || dev.kind === "cam")) filesBtn.disabled = true;
   const online = dev.kind === "self" || !!state.presence[dev.id]?.online;
   const link = linkSummary(dev);
   if (title) title.textContent = "基础连接";
@@ -529,6 +532,13 @@ function specInfo(dev) {
   if (!dev) return {};
   if (dev.kind === "self") return state.selfInfo || {};
   return (state.presence[dev.id] && state.presence[dev.id].info) || {};
+}
+
+function deviceVersion(dev) {
+  if (!dev) return "";
+  if (dev.kind === "self") return String((state.selfInfo && state.selfInfo.version) || "");
+  const presence = state.presence[dev.id] || {};
+  return String(presence.version || (presence.info && presence.info.version) || "");
 }
 
 function renderSpecs(dev) {
@@ -626,9 +636,11 @@ function renderDeviceList() {
     const extra = d.kind === "self"
       ? (link.label || "这台电脑")
       : (isPaired(d) ? `已连接 · ${link.label}` : link.label);
+    const ver = deviceVersion(d);
     const tag = tone && tone !== "online"
       ? `<span class="phase-tag ${tone}">${esc(link.parts && link.parts[0] ? link.parts[0].phase : link.label)}</span>`
       : (d.kind === "self" ? "<span class=\"tag\">本设备</span>" : `<span class="kicker">${formatId(d.id)}</span>`);
+    const verTag = ver ? `<span class="device-ver" title="尘埃X 版本">${esc(ver)}</span>` : "";
     const del = d.kind === "self" ? "" : `<button type="button" class="device-del" data-forget-key="${esc(d.key)}" title="从本机列表删除">删除</button>`;
     return `<div class="device-row${d.key === state.selected ? " is-on" : ""}${tone ? ` is-${tone}` : ""}" data-key="${esc(d.key)}">
       <span class="live ${tone || (online ? "on" : "")}"></span>
@@ -636,7 +648,7 @@ function renderDeviceList() {
         <strong>${esc(label)}</strong>
         <span class="kicker">${esc(extra)}</span>
       </span>
-      <span class="device-aside">${tag}${del}</span>
+      <span class="device-aside"><span class="device-meta">${tag}${verTag}</span>${del}</span>
     </div>`;
   }).join("");
   syncTools();
@@ -773,7 +785,7 @@ async function applyUpdate(force) {
   try {
     const preview = await (await fetch("/api/update")).json();
     const behind = !!(preview && preview.latest && versionLess(preview.current || "", preview.latest));
-    if (!preview || !preview.ok || !preview.newer || !behind) {
+    if (!preview || !preview.ok || !preview.newer || !behind || !preview.url || !preview.size) {
       window.dustxUpdating = false;
       hideUpdateBar();
       return;
@@ -848,7 +860,7 @@ async function checkUpdatePrompt() {
       hideUpdateBar();
       return;
     }
-    if (data.force) {
+    if (data.force && data.url && data.size) {
       applyUpdate(true);
       return;
     }
@@ -895,7 +907,7 @@ function routeSignalIn(msg) {
     return;
   }
   if (msg.type === "agent") {
-    postSig("mesh", msg);
+    handleHostAgent(msg);
     return;
   }
   if (msg.type === "registered" || msg.type === "password") {
@@ -949,6 +961,22 @@ function routeSignalIn(msg) {
   }
   postSig("remote", msg);
   postSig("mesh", msg);
+}
+
+async function handleHostAgent(msg) {
+  let result = { ok: false, error: "agent failed" };
+  try {
+    result = await (await fetch("/api/agent/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(msg || {}),
+    })).json();
+  } catch (e) {
+    result = { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+  const out = Object.assign({ type: "agent_result", id: msg && msg.id }, result);
+  delete out.v;
+  sendSigOut(out);
 }
 
 function sendSigOut(payload) {

@@ -450,7 +450,9 @@ bool write_and_spawn_helper(const std::string& payload, std::string* err) {
       "if not exist \"%DIR%\\DustX.exe\" goto fail\r\n"
       "fc /b \"%SRC%\\DustX.exe\" \"%DIR%\\DustX.exe\" >nul\r\n"
       "if errorlevel 1 goto fail\r\n"
+      "if not exist \"%SRC%\\web\\shell.html\" goto fail\r\n"
       "robocopy \"%SRC%\" \"%DIR%\" /E /IS /IT /R:2 /W:1 /NFL /NDL /NJH /NJS /NC /NS /NP /XF DustX.exe\r\n"
+      "if not exist \"%DIR%\\web\\shell.html\" goto fail\r\n"
       "if exist \"%DIR%\\DustX.exe.bak\" del /f /q \"%DIR%\\DustX.exe.bak\"\r\n"
       "start \"\" \"%DIR%\\DustX.exe\"\r\n"
       "exit /b 0\r\n"
@@ -459,6 +461,7 @@ bool write_and_spawn_helper(const std::string& payload, std::string* err) {
       "  del /f /q \"%DIR%\\DustX.exe\" >nul 2>nul\r\n"
       "  ren \"%DIR%\\DustX.exe.bak\" DustX.exe\r\n"
       ")\r\n"
+      "if exist \"%DIR%\\DustX.exe\" start \"\" \"%DIR%\\DustX.exe\"\r\n"
       "exit /b 1\r\n";
   if (!write_text(script, body)) {
     if (err) *err = "无法写更新脚本";
@@ -546,6 +549,13 @@ bool apply_worker(UpdateInfo info) {
     g_applying = false;
     return false;
   }
+#ifdef _WIN32
+  if (!fs::exists(path_from_utf8(payload) / "web" / "shell.html")) {
+    set_phase("error", "更新包缺少界面文件");
+    g_applying = false;
+    return false;
+  }
+#endif
   if (!write_and_spawn_helper(payload, &err)) {
     set_phase("error", err);
     g_applying = false;

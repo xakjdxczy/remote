@@ -2,22 +2,9 @@
 #include "log.hpp"
 #include "server.hpp"
 #include "update.hpp"
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
+#include "util.hpp"
 
 #include <string>
-
-#ifdef _WIN32
-static void fail(const wchar_t* text) { MessageBoxW(nullptr, text, L"DustX", MB_OK | MB_ICONERROR); }
-#else
-#include <iostream>
-static void fail(const char* text) { std::cerr << text << '\n'; }
-#endif
 
 static int dustx_main() {
   dustx::log_info("app", "尘埃X 启动");
@@ -25,12 +12,13 @@ static int dustx_main() {
   dustx::Server server;
   if (!server.start()) {
     dustx::log_error("app", "无法监听本机端口");
-#ifdef _WIN32
-    fail(L"无法监听本机端口，手机摄像头配对服务没有启动。");
-#else
-    fail("无法监听本机端口，手机摄像头配对服务没有启动。");
-#endif
+    dustx::alert_error("无法监听本机端口，界面和手机摄像头都用不了。\n\n日志：" + dustx::log_file_path());
     return 1;
+  }
+  if (!server.has_shell_ui()) {
+    dustx::log_error("app", "缺少界面文件 " + server.web_dir() + "/shell.html");
+    dustx::alert_error("界面文件缺失，窗口会是白屏。\n请重新下载安装尘埃X。\n\n目录：" + server.web_dir() +
+                       "\n日志：" + dustx::log_file_path());
   }
   dustx::start_update_watcher();
   return dustx::run_native_app(server.port());

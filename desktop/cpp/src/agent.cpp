@@ -19,6 +19,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <shlobj.h>
 #else
 #include <errno.h>
 #include <fcntl.h>
@@ -67,6 +68,12 @@ std::string agent_root() {
   const std::string override = getenv_or("DUSTX_AGENT_ROOT", "");
   if (!override.empty()) return override;
 #ifdef _WIN32
+  PWSTR w = nullptr;
+  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Profile, KF_FLAG_DEFAULT, nullptr, &w)) && w) {
+    const std::string s = wide_to_utf8(w);
+    CoTaskMemFree(w);
+    if (!s.empty()) return s;
+  }
   wchar_t buf[MAX_PATH];
   const DWORD n = GetEnvironmentVariableW(L"USERPROFILE", buf, MAX_PATH);
   if (n > 0 && n < MAX_PATH) return wide_to_utf8(buf);
@@ -100,7 +107,7 @@ bool is_volume_root(const fs::path& p) {
   return s.size() == 3 && s[1] == ':' && (s[2] == '\\' || s[2] == '/');
 }
 
-bool resolve_path(const std::string& raw, fs::path* out, std::string* err) {
+bool resolve_path(const std::string& raw, fs::path* out, std::string* err, bool full = false) {
   const std::string root_s = agent_root();
   if (root_s.empty()) {
     *err = "no home directory";
@@ -123,7 +130,7 @@ bool resolve_path(const std::string& raw, fs::path* out, std::string* err) {
       return false;
     }
   }
-  if (!is_abs_path(raw) && !under_root(root, candidate)) {
+  if (!under_root(root, candidate) && !(full && is_abs_path(raw))) {
     *err = "path outside home";
     return false;
   }
@@ -151,7 +158,12 @@ std::string list_dir(const fs::path& target) {
     return path_utf8(a.filename()) < path_utf8(b.filename());
   });
   std::ostringstream o;
-  o << "{\"ok\":true,\"op\":\"list\",\"path\":\"" << json_escape(path_utf8(target)) << "\",\"entries\":[";
+  const std::string target_s = path_utf8(target);
+  const std::string root_s = agent_root();
+  const bool at_home = !root_s.empty() && path_from_utf8(target_s).lexically_normal() ==
+                                             path_from_utf8(root_s).lexically_normal();
+  o << "{\"ok\":true,\"op\":\"list\",\"path\":\"" << json_escape(target_s) << "\",\"home\":"
+    << (at_home ? "true" : "false") << ",\"entries\":[";
   int n = 0;
   for (const auto& item : items) {
     if (n >= kMaxList) break;
@@ -527,13 +539,15 @@ std::string agent_run(const std::string& body) {
   const std::string cwd = json_get_string(body, "cwd");
   const long long offset = json_get_ll(body, "offset", 0);
   const long long length = json_get_ll(body, "length", 0);
+  const bool home = json_get_bool(body, "home", false) || path.empty();
+  const bool full = json_get_bool(body, "full", false);
   log_info("agent", op + (path.empty() ? "" : " " + path));
   if (op == "volumes") return list_volumes();
   if (op == "exec") {
     if (command.empty()) return err_json("command required");
     fs::path work;
     std::string err;
-    if (!resolve_path(cwd, &work, &err)) return err_json(err);
+    if (!resolve_path(cwd, &work, &err, full)) return err_json(err);
     std::error_code ec;
     if (!fs::is_directory(work, ec)) return err_json("cwd is not a directory", path_utf8(work));
     return run_exec(command, work);
@@ -543,7 +557,7 @@ std::string agent_run(const std::string& body) {
   }
   fs::path target;
   std::string err;
-  if (!resolve_path(path, &target, &err)) return err_json(err);
+  if (!resolve_path(home ? "" : path, &target, &err, full)) return err_json(err);
   if (op == "list") return list_dir(target);
   if (op == "read") return read_file_op(target, offset, length);
   if (op == "write") return write_file_op(target, content, content_b64, offset);

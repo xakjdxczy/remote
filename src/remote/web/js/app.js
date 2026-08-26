@@ -727,6 +727,25 @@ function onSessionMessage(data) {
   }
 }
 
+async function captureDisplay() {
+  // Do not cap width/height here. On Windows dual-GPU laptops, getDisplayMedia
+  // of the entire monitor with a downscale constraint often returns black frames.
+  const opts = {
+    video: { frameRate: { ideal: 30 }, displaySurface: "monitor" },
+    audio: false,
+    selfBrowserSurface: "include",
+    monitorTypeSurfaces: "include",
+    preferCurrentTab: false,
+    systemAudio: "exclude",
+  };
+  try {
+    return await navigator.mediaDevices.getDisplayMedia(opts);
+  } catch (err) {
+    if (!err || err.name !== "TypeError") throw err;
+    return await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+  }
+}
+
 async function startHostP2P(session) {
   closeP2P();
   state.role = "host";
@@ -739,10 +758,7 @@ async function startHostP2P(session) {
           video: { width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         })
-      : await navigator.mediaDevices.getDisplayMedia({
-          video: { frameRate: 30, width: { max: 1280 }, height: { max: 720 } },
-          audio: false,
-        });
+      : await captureDisplay();
   } catch {
     sendSignal({ type: "hangup", reason: camera ? "camera_denied" : "screen_denied" });
     endSession(camera ? "未授权摄像头" : "未授权共享屏幕");

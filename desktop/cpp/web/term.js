@@ -69,6 +69,13 @@ async function boot() {
     const app = await (await fetch("/api/app")).json();
     state.signalHttp = app.signal_http || "";
   } catch { /* ignore */ }
+  if (!state.signalHttp) state.signalHttp = "https://117.72.108.246";
+  if (!state.fromId && !state.local) {
+    try {
+      const mesh = await (await fetch("/api/mesh")).json();
+      state.fromId = String(mesh.device_id || "").replace(/\D/g, "");
+    } catch { /* ignore */ }
+  }
   const listed = await run({ op: "list", path: "", full: true });
   if (listed.ok) {
     state.cwd = listed.path || "";

@@ -55,28 +55,25 @@ jobs:
             cmake-build.log
           if-no-files-found: ignore
 
-      - name: Stage exe
+      - name: Stage zip
         shell: bash
         run: |
-          mkdir -p artifact/DustX
-          cp desktop/cpp/build/Release/DustX.exe artifact/DustX/
-          cp desktop/cpp/build/Release/DustXCam.dll artifact/DustX/
-          cp desktop/cpp/build/Release/DustXMic.dll artifact/DustX/
-          if [ -f desktop/cpp/build/Release/wintun.dll ]; then
-            cp desktop/cpp/build/Release/wintun.dll artifact/DustX/
+          set -euo pipefail
+          test -f desktop/cpp/build/Release/DustX.exe
+          test -f desktop/cpp/build/Release/web/shell.html
+          test -f desktop/cpp/build/Release/web/remote-ui/js/app.js
+          mkdir -p artifact/stage
+          cp -R desktop/cpp/build/Release/. artifact/stage/
+          if [ ! -f artifact/stage/web/remote-ui/js/app.js ]; then
+            mkdir -p artifact/stage/web/remote-ui
+            cp -R src/remote/web/. artifact/stage/web/remote-ui/
           fi
-          cp -R desktop/cpp/web artifact/DustX/web
-          if [ -d desktop/cpp/build/Release/openssh ]; then
-            cp -R desktop/cpp/build/Release/openssh artifact/DustX/openssh
-          fi
-          if [ -d desktop/cpp/build/Release/platform-tools ]; then
-            cp -R desktop/cpp/build/Release/platform-tools artifact/DustX/platform-tools
-          fi
-          ls -la artifact/DustX
+          (cd artifact/stage && tar.exe -a -c -f ../DustX-windows.zip *)
+          ls -la artifact/DustX-windows.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: DustX-windows
-          path: artifact/DustX
+          path: artifact/DustX-windows.zip
           if-no-files-found: error
           retention-days: 14

@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -80,6 +81,34 @@ std::string exe_dir() {
 #endif
 }
 
+#ifdef _WIN32
+std::string first_web_dir(const std::filesystem::path& root) {
+  std::error_code ec;
+  const auto direct = root / "web" / "shell.html";
+  if (std::filesystem::is_regular_file(direct, ec)) return (root / "web").string();
+  if (!std::filesystem::is_directory(root, ec)) return {};
+  for (std::filesystem::directory_iterator it(root, ec), end; it != end && !ec; it.increment(ec)) {
+    if (!it->is_directory()) continue;
+    const auto nested = it->path() / "web" / "shell.html";
+    if (std::filesystem::is_regular_file(nested, ec)) return (it->path() / "web").string();
+  }
+  return {};
+}
+
+void heal_web_from_update_unpack(const std::string& dest) {
+  const char* local = std::getenv("LOCALAPPDATA");
+  if (!local || !*local || dest.empty()) return;
+  const std::string src = first_web_dir(std::filesystem::path(local) / "DustX" / "update" / "unpack");
+  if (src.empty()) return;
+  std::error_code ec;
+  std::filesystem::create_directories(dest, ec);
+  std::filesystem::copy(src, dest,
+                        std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing,
+                        ec);
+  if (!ec) log_info("app", "已从更新缓存恢复界面文件");
+}
+#endif
+
 std::string find_web_dir() {
   const char* env = std::getenv("DUSTX_WEB_DIR");
   if (env && *env) return env;
@@ -94,6 +123,11 @@ std::string find_web_dir() {
     std::string p = dir + rel;
     if (!read_file(p + "/cam.html").empty()) return p;
   }
+#ifdef _WIN32
+  const std::string dest = dir + "/web";
+  heal_web_from_update_unpack(dest);
+  if (!read_file(dest + "/cam.html").empty()) return dest;
+#endif
   return dir + "/web";
 }
 
@@ -370,6 +404,8 @@ std::string mesh_start_json(Mesh& mesh, const std::string& body) {
 
 Server::Server() : web_dir_(find_web_dir()), remote_ui_dir_(find_remote_ui_dir(web_dir_)) {}
 
+bool Server::has_shell_ui() const { return !read_file(web_dir_ + "/shell.html").empty(); }
+
 Server::~Server() { stop(); }
 
 bool Server::start() {
@@ -385,6 +421,8 @@ bool Server::start() {
   if (listen_fd_ < 0) return false;
   running_ = true;
   log_info("server", "本机服务已监听 127.0.0.1:" + std::to_string(port_));
+  const bool has_shell = !read_file(web_dir_ + "/shell.html").empty();
+  log_info("server", std::string("界面目录 ") + web_dir_ + (has_shell ? "（shell.html 在）" : "（缺少 shell.html，窗口会白屏）"));
   thread_ = std::thread([this] { accept_loop(); });
   return true;
 }

@@ -25,6 +25,7 @@ bool read_some(int fd, void* data, size_t n, size_t& got);
 std::string getenv_or(const char* key, const char* fallback);
 std::string remote_console_url();
 int default_listen_port();
+void alert_error(const std::string& text);
 
 #ifdef _WIN32
 std::wstring utf8_to_wide(const std::string& s);

@@ -95,10 +95,12 @@ def _presence_entry(did: str) -> dict[str, Any]:
         last_seen = float(stored.get("updated_at") or 0)
     hostname = _pretty_hostname(host.hostname if host else "", info)
     os_name = str(info.get("os") or (host.os_name if host else "") or "")
+    version = str(info.get("version") or "")
     return {
         "online": host is not None,
         "hostname": hostname,
         "os": os_name,
+        "version": version,
         "ip": ip,
         "last_seen": int(last_seen) if last_seen else 0,
         "info": info,
