@@ -68,7 +68,8 @@ jobs:
             mkdir -p artifact/stage/web/remote-ui
             cp -R src/remote/web/. artifact/stage/web/remote-ui/
           fi
-          (cd artifact/stage && tar.exe -a -c -f ../DustX-windows.zip *)
+          (cd artifact/stage && /c/Windows/System32/tar.exe -a -c -f ../DustX-windows.zip *)
+          python -c "import zipfile,sys; p='artifact/DustX-windows.zip'; sys.exit(0 if zipfile.is_zipfile(p) else 1)"
           ls -la artifact/DustX-windows.zip
 
       - uses: actions/upload-artifact@v4
