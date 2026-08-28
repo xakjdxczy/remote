@@ -199,7 +199,7 @@ elseif(WIN32)
   target_compile_definitions(DustX PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN "DUSTX_APP_VERSION=\"${DUSTX_APP_VERSION}\"")
   target_link_libraries(DustX PRIVATE
     "${WV2_LIB}"
-    ole32 oleaut32 uuid user32 gdi32 advapi32 shlwapi version strmiids iphlpapi ws2_32 shell32
+    ole32 oleaut32 uuid user32 gdi32 advapi32 shlwapi version strmiids iphlpapi ws2_32
   )
   FetchContent_Declare(
     wintun

@@ -2,7 +2,6 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <shellapi.h>
 #include <wrl.h>
 #include <WebView2.h>
 
@@ -26,7 +25,7 @@ namespace {
 constexpr UINT WM_DUSTX_NAV = WM_APP + 21;
 constexpr UINT WM_DUSTX_CREATE_WEB = WM_APP + 22;
 constexpr UINT WM_DUSTX_RETRY_WEB = WM_APP + 23;
-constexpr UINT WM_DUSTX_BROWSER = WM_APP + 24;
+constexpr UINT WM_DUSTX_WEBVIEW_FAIL = WM_APP + 24;
 const HRESULT kWebViewInvalidState = HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
 
 HWND g_hwnd = nullptr;
@@ -39,14 +38,12 @@ int g_webview_try = 0;
 bool g_allow_close = false;
 bool g_close_checking = false;
 bool g_nav_alerted = false;
-bool g_browser_ui = false;
 std::wstring g_data_dir;
 
 void create_controller();
 void start_webview_env();
 void retry_webview();
-void open_shell_in_browser();
-void request_browser_ui();
+void fail_webview(HRESULT hr, const char* what);
 
 struct ExtraWin {
   HWND hwnd = nullptr;
@@ -59,14 +56,6 @@ std::vector<std::unique_ptr<ExtraWin>> g_extras;
 void wire_web(ICoreWebView2* web);
 void open_extra(const std::wstring& uri);
 void navigate();
-void request_navigate();
-
-std::wstring webview_browser_args() {
-  // Do not pass --enable-features (WGC) or --proxy-server here. Extra Chromium
-  // switches have made CreateCoreWebView2Controller return 0x8007139F on this
-  // machine after 2026.8.26.5. Local HTTP already bypasses the system proxy.
-  return L"";
-}
 
 void request_navigate() {
   if (g_hwnd) PostMessageW(g_hwnd, WM_DUSTX_NAV, 0, 0);
@@ -295,20 +284,6 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     case WM_SIZE:
       resize_web();
       return 0;
-    case WM_PAINT: {
-      PAINTSTRUCT ps{};
-      HDC hdc = BeginPaint(hwnd, &ps);
-      if (!g_controller) {
-        RECT rc{};
-        GetClientRect(hwnd, &rc);
-        FillRect(hdc, &rc, reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
-        DrawTextW(hdc,
-                  L"尘埃X 本机服务已在运行。\n界面已在系统浏览器打开。\n关闭本窗口会退出尘埃X。", -1, &rc,
-                  DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
-      }
-      EndPaint(hwnd, &ps);
-      return 0;
-    }
     case WM_DUSTX_NAV:
       navigate();
       return 0;
@@ -318,9 +293,13 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     case WM_DUSTX_RETRY_WEB:
       retry_webview();
       return 0;
-    case WM_DUSTX_BROWSER:
-      open_shell_in_browser();
+    case WM_DUSTX_WEBVIEW_FAIL: {
+      const auto hr = static_cast<HRESULT>(wparam);
+      dustx::alert_error("无法创建界面窗口（WebView2）。\n错误：" + hr_hex(hr) + "\n\n日志：" +
+                         dustx::log_file_path());
+      PostQuitMessage(1);
       return 0;
+    }
     case WM_TIMER:
       if (wparam == 1) {
         KillTimer(hwnd, 1);
@@ -371,25 +350,14 @@ void enable_dpi_awareness() {
   dustx::log_info("webview", "DPI 系统感知（回退）");
 }
 
-void request_browser_ui() {
-  if (g_hwnd) PostMessageW(g_hwnd, WM_DUSTX_BROWSER, 0, 0);
-  else open_shell_in_browser();
-}
-
-void open_shell_in_browser() {
-  if (g_browser_ui || g_port <= 0) return;
-  g_browser_ui = true;
-  wchar_t buf[128];
-  swprintf(buf, 128, L"http://127.0.0.1:%d/", g_port);
-  log_wide("改用系统浏览器打开 ", buf);
-  std::string unused;
-  install_vcam(&unused);
-  install_vmic(&unused);
-  ShellExecuteW(nullptr, L"open", buf, nullptr, nullptr, SW_SHOWNORMAL);
+void fail_webview(HRESULT hr, const char* what) {
+  dustx::log_error("webview", std::string(what) + " " + hr_hex(hr));
   if (g_hwnd) {
-    SetWindowTextW(g_hwnd, L"尘埃X（已在浏览器打开）");
-    InvalidateRect(g_hwnd, nullptr, TRUE);
+    PostMessageW(g_hwnd, WM_DUSTX_WEBVIEW_FAIL, static_cast<WPARAM>(hr), 0);
+    return;
   }
+  dustx::alert_error("无法创建界面窗口（WebView2）。\n错误：" + hr_hex(hr) + "\n\n日志：" + dustx::log_file_path());
+  PostQuitMessage(1);
 }
 
 void create_controller() {
@@ -406,7 +374,7 @@ void create_controller() {
                         SetTimer(g_hwnd, 2, 400, nullptr);
                         return result2;
                       }
-                      request_browser_ui();
+                      fail_webview(result2, "创建 WebView2 控件失败");
                       return result2;
                     }
                     dustx::log_info("webview", "WebView2 控件已创建");
@@ -429,14 +397,13 @@ void create_controller() {
 void start_webview_env() {
   ensure_user_data_dir(g_data_dir);
   dustx::log_info("webview", "用户目录 " + dustx::wide_to_utf8(g_data_dir));
-  dustx::log_info("webview", "启动参数 " + dustx::wide_to_utf8(webview_browser_args()));
   HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(
       nullptr, g_data_dir.c_str(), nullptr,
       Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
           [](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
             if (FAILED(result) || !env) {
               dustx::log_error("webview", "创建 WebView2 环境失败 " + hr_hex(result));
-              request_browser_ui();
+              fail_webview(result, "创建 WebView2 环境失败");
               return result;
             }
             dustx::log_info("webview", "WebView2 环境已创建");
@@ -447,7 +414,7 @@ void start_webview_env() {
           .Get());
   if (FAILED(hr)) {
     dustx::log_error("webview", "启动 WebView2 失败 " + hr_hex(hr));
-    request_browser_ui();
+    fail_webview(hr, "启动 WebView2 失败");
   }
 }
 
