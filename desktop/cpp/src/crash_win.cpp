@@ -159,7 +159,10 @@ void install_crash_handler() {
 
 std::string crash_dir() {
   fill_dir();
-  return wide_to_utf8(g_dir);
+  char utf8[MAX_PATH * 3];
+  utf8[0] = 0;
+  WideCharToMultiByte(CP_UTF8, 0, g_dir, -1, utf8, sizeof(utf8), nullptr, nullptr);
+  return utf8;
 }
 
 bool write_minidump(EXCEPTION_POINTERS* ep, const char* why) { return dump_now(ep, why); }
