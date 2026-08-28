@@ -26,6 +26,7 @@ constexpr UINT WM_DUSTX_NAV = WM_APP + 21;
 constexpr UINT WM_DUSTX_CREATE_WEB = WM_APP + 22;
 constexpr UINT WM_DUSTX_RETRY_WEB = WM_APP + 23;
 constexpr UINT WM_DUSTX_WEBVIEW_FAIL = WM_APP + 24;
+constexpr UINT WM_DUSTX_WEB_READY = WM_APP + 25;
 const HRESULT kWebViewInvalidState = HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
 
 HWND g_hwnd = nullptr;
@@ -44,6 +45,7 @@ void create_controller();
 void start_webview_env();
 void retry_webview();
 void fail_webview(HRESULT hr, const char* what);
+void finish_web_ui();
 
 struct ExtraWin {
   HWND hwnd = nullptr;
@@ -151,6 +153,12 @@ bool is_app_url(const wchar_t* uri) {
   return wcsstr(uri, need) != nullptr;
 }
 
+bool should_block_nav(const wchar_t* uri) {
+  if (!uri || !uri[0] || g_port <= 0) return false;
+  if (is_app_url(uri)) return false;
+  return wcsncmp(uri, L"http:", 5) == 0 || wcsncmp(uri, L"https:", 6) == 0;
+}
+
 void wire_web(ICoreWebView2* web) {
   if (!web) return;
   allow_media_permissions(web);
@@ -159,8 +167,7 @@ void wire_web(ICoreWebView2* web) {
           [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
             LPWSTR uri = nullptr;
             args->get_Uri(&uri);
-            const bool ok = is_app_url(uri);
-            if (!ok && g_port > 0) {
+            if (should_block_nav(uri)) {
               log_wide("拦截跳转 ", uri);
               args->put_Cancel(TRUE);
               request_navigate();
@@ -290,6 +297,9 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     case WM_DUSTX_CREATE_WEB:
       create_controller();
       return 0;
+    case WM_DUSTX_WEB_READY:
+      finish_web_ui();
+      return 0;
     case WM_DUSTX_RETRY_WEB:
       retry_webview();
       return 0;
@@ -307,6 +317,11 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       } else if (wparam == 2) {
         KillTimer(hwnd, 2);
         retry_webview();
+      } else if (wparam == 3) {
+        KillTimer(hwnd, 3);
+        std::string unused;
+        dustx::install_vcam(&unused);
+        dustx::install_vmic(&unused);
       }
       return 0;
     case WM_CLOSE:
@@ -360,6 +375,16 @@ void fail_webview(HRESULT hr, const char* what) {
   PostQuitMessage(1);
 }
 
+void finish_web_ui() {
+  if (!g_controller || !g_web || !g_hwnd) return;
+  dustx::log_info("webview", "在界面线程挂上页面");
+  resize_web();
+  wire_web(g_web.Get());
+  navigate();
+  SetTimer(g_hwnd, 1, 400, nullptr);
+  SetTimer(g_hwnd, 3, 1200, nullptr);
+}
+
 void create_controller() {
   if (!g_env || !g_hwnd) return;
   dustx::log_info("webview", "在界面线程创建 WebView2 控件 try=" + std::to_string(g_webview_try));
@@ -380,15 +405,7 @@ void create_controller() {
                     dustx::log_info("webview", "WebView2 控件已创建");
                     g_controller = controller;
                     g_controller->get_CoreWebView2(&g_web);
-                    resize_web();
-                    wire_web(g_web.Get());
-                    {
-                      std::string unused;
-                      dustx::install_vcam(&unused);
-                      dustx::install_vmic(&unused);
-                    }
-                    navigate();
-                    if (g_hwnd) SetTimer(g_hwnd, 1, 400, nullptr);
+                    if (g_hwnd) PostMessageW(g_hwnd, WM_DUSTX_WEB_READY, 0, 0);
                     return S_OK;
                   })
                   .Get());
