@@ -6,6 +6,7 @@
 #include <WebView2.h>
 
 #include "app.hpp"
+#include "crash_win.hpp"
 #include "log.hpp"
 #include "update.hpp"
 #include "util.hpp"
@@ -62,6 +63,8 @@ void navigate();
 void request_navigate() {
   if (g_hwnd) PostMessageW(g_hwnd, WM_DUSTX_NAV, 0, 0);
 }
+
+std::string tid() { return " tid=" + std::to_string(GetCurrentThreadId()); }
 
 std::string hr_hex(HRESULT hr) {
   char buf[16];
@@ -167,6 +170,7 @@ void wire_web(ICoreWebView2* web) {
           [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
             LPWSTR uri = nullptr;
             args->get_Uri(&uri);
+            log_wide("开始打开 ", uri);
             if (should_block_nav(uri)) {
               log_wide("拦截跳转 ", uri);
               args->put_Cancel(TRUE);
@@ -190,7 +194,7 @@ void wire_web(ICoreWebView2* web) {
             if (g_web) g_web->get_Source(&src);
             dustx::log_info("webview", std::string(ok ? "页面打开成功 " : "页面打开失败 ") +
                                            (src ? dustx::wide_to_utf8(src) : "") + " err=" +
-                                           std::to_string(static_cast<int>(err)));
+                                           std::to_string(static_cast<int>(err)) + tid());
             if (src) CoTaskMemFree(src);
             if (ok) {
               g_nav_tries = 0;
@@ -222,6 +226,17 @@ void wire_web(ICoreWebView2* web) {
               open_extra(uri);
               CoTaskMemFree(uri);
             }
+            return S_OK;
+          })
+          .Get(),
+      nullptr);
+  web->add_ProcessFailed(
+      Callback<ICoreWebView2ProcessFailedEventHandler>(
+          [](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT {
+            COREWEBVIEW2_PROCESS_FAILED_KIND kind = COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED;
+            if (args) args->get_ProcessFailedKind(&kind);
+            dustx::log_error("webview", "WebView2 进程失败 kind=" + std::to_string(static_cast<int>(kind)) + tid());
+            dustx::write_minidump(nullptr, "webview-process-failed");
             return S_OK;
           })
           .Get(),
@@ -319,12 +334,15 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         retry_webview();
       } else if (wparam == 3) {
         KillTimer(hwnd, 3);
+        dustx::log_info("webview", "开始注册虚拟摄像头/麦克风" + tid());
         std::string unused;
         dustx::install_vcam(&unused);
         dustx::install_vmic(&unused);
+        dustx::log_info("webview", "虚拟设备注册结束" + tid());
       }
       return 0;
     case WM_CLOSE:
+      dustx::log_info("webview", std::string("WM_CLOSE allow=") + (g_allow_close ? "1" : "0") + tid());
       if (g_allow_close) {
         DestroyWindow(hwnd);
         return 0;
@@ -332,6 +350,7 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       ask_close_then_destroy();
       return 0;
     case WM_DESTROY:
+      dustx::log_info("webview", "WM_DESTROY，准备退出" + tid());
       PostQuitMessage(0);
       return 0;
     default:
@@ -376,10 +395,14 @@ void fail_webview(HRESULT hr, const char* what) {
 }
 
 void finish_web_ui() {
-  if (!g_controller || !g_web || !g_hwnd) return;
-  dustx::log_info("webview", "在界面线程挂上页面");
+  if (!g_controller || !g_web || !g_hwnd) {
+    dustx::log_error("webview", "finish_web_ui 缺控件" + tid());
+    return;
+  }
+  dustx::log_info("webview", "在界面线程挂上页面" + tid());
   resize_web();
   wire_web(g_web.Get());
+  dustx::log_info("webview", "已绑定事件，开始 Navigate" + tid());
   navigate();
   SetTimer(g_hwnd, 1, 400, nullptr);
   SetTimer(g_hwnd, 3, 1200, nullptr);
@@ -387,7 +410,7 @@ void finish_web_ui() {
 
 void create_controller() {
   if (!g_env || !g_hwnd) return;
-  dustx::log_info("webview", "在界面线程创建 WebView2 控件 try=" + std::to_string(g_webview_try));
+  dustx::log_info("webview", "在界面线程创建 WebView2 控件 try=" + std::to_string(g_webview_try) + tid());
   g_env->CreateCoreWebView2Controller(
       g_hwnd, Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                   [](HRESULT result2, ICoreWebView2Controller* controller) -> HRESULT {
@@ -402,7 +425,7 @@ void create_controller() {
                       fail_webview(result2, "创建 WebView2 控件失败");
                       return result2;
                     }
-                    dustx::log_info("webview", "WebView2 控件已创建");
+                    dustx::log_info("webview", "WebView2 控件已创建" + tid());
                     g_controller = controller;
                     g_controller->get_CoreWebView2(&g_web);
                     if (g_hwnd) PostMessageW(g_hwnd, WM_DUSTX_WEB_READY, 0, 0);
@@ -423,7 +446,7 @@ void start_webview_env() {
               fail_webview(result, "创建 WebView2 环境失败");
               return result;
             }
-            dustx::log_info("webview", "WebView2 环境已创建");
+            dustx::log_info("webview", "WebView2 环境已创建" + tid());
             g_env = env;
             if (g_hwnd) PostMessageW(g_hwnd, WM_DUSTX_CREATE_WEB, 0, 0);
             return S_OK;
@@ -452,6 +475,7 @@ int run_native_app(int port) {
   SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", L"");
   SetEnvironmentVariableW(L"WEBVIEW2_USER_DATA_FOLDER", nullptr);
   set_update_quit([] {
+    dustx::log_warn("update", "更新请求退出窗口");
     g_allow_close = true;
     if (g_hwnd) PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
   });
@@ -483,6 +507,7 @@ int run_native_app(int port) {
     TranslateMessage(&msg);
     DispatchMessageW(&msg);
   }
+  log_info("webview", "消息循环结束 code=" + std::to_string(static_cast<int>(msg.wParam)));
   g_web.Reset();
   g_controller.Reset();
   g_env.Reset();

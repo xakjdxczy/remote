@@ -502,6 +502,7 @@ bool write_and_spawn_helper(const std::string& payload, std::string* err) {
 }
 
 void request_quit() {
+  log_warn("update", "即将退出以完成更新");
   std::function<void()> fn;
   {
     std::lock_guard<std::mutex> lock(g_mu);
@@ -509,7 +510,10 @@ void request_quit() {
   }
   if (fn) fn();
 #ifdef _WIN32
-  else ExitProcess(0);
+  else {
+    log_error("update", "没有窗口回调，ExitProcess");
+    ExitProcess(0);
+  }
 #else
   else _exit(0);
 #endif
@@ -588,7 +592,11 @@ void start_update_watcher() {
         if (g_phase == "checking") g_phase = info.ok ? "idle" : "error";
         if (!info.ok) g_phase_err = info.error;
       }
+      log_info("update", std::string("检查 ok=") + (info.ok ? "1" : "0") + " force=" + (info.force ? "1" : "0") +
+                             " newer=" + (info.newer ? "1" : "0") + " current=" + info.current +
+                             " latest=" + info.latest);
       if (info.ok && info.force && info.newer && !g_applying.exchange(true)) {
+        log_warn("update", std::string("强制更新 ") + info.current + " -> " + info.latest);
         if (apply_worker(info)) return;
       }
       std::this_thread::sleep_for(std::chrono::seconds(45));

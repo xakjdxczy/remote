@@ -3,19 +3,25 @@
 #include "server.hpp"
 #include "update.hpp"
 #include "util.hpp"
+#include "version.hpp"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
+
+#include "crash_win.hpp"
 #endif
 
 #include <string>
 
 static int dustx_main() {
-  dustx::log_info("app", "尘埃X 启动");
+  dustx::log_info("app", std::string("尘埃X 启动 ") + dustx::kAppVersion);
   dustx::log_info("app", std::string("日志文件 ") + dustx::log_file_path());
+#ifdef _WIN32
+  dustx::log_info("app", "pid=" + std::to_string(GetCurrentProcessId()) + " 崩溃目录 " + dustx::crash_dir());
+#endif
   dustx::Server server;
   if (!server.start()) {
     dustx::log_error("app", "无法监听本机端口");
@@ -33,6 +39,7 @@ static int dustx_main() {
 
 #ifdef _WIN32
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+  dustx::install_crash_handler();
   using SetDpiFn = BOOL(WINAPI*)(void*);
   auto set_dpi = reinterpret_cast<SetDpiFn>(
       GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetProcessDpiAwarenessContext"));
