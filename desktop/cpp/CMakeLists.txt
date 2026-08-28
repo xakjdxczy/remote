@@ -174,6 +174,8 @@ elseif(WIN32)
   add_dependencies(DustX DustXCam DustXMic)
   set_target_properties(DustX PROPERTIES OUTPUT_NAME "DustX")
   set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/dustx.rc" PROPERTIES GENERATED TRUE)
+  # .rc already embeds app.manifest; MSVC's default linker manifest would duplicate it.
+  target_link_options(DustX PRIVATE "/MANIFEST:NO")
   include(FetchContent)
   if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
