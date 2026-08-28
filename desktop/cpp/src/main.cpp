@@ -32,7 +32,15 @@ static int dustx_main() {
 }
 
 #ifdef _WIN32
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) { return dustx_main(); }
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+  using SetDpiFn = BOOL(WINAPI*)(void*);
+  auto set_dpi = reinterpret_cast<SetDpiFn>(
+      GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetProcessDpiAwarenessContext"));
+  if (!set_dpi || !set_dpi(reinterpret_cast<void*>(static_cast<LONG_PTR>(-4)))) {
+    SetProcessDPIAware();
+  }
+  return dustx_main();
+}
 #else
 int main() { return dustx_main(); }
 #endif

@@ -10,6 +10,8 @@ if(NOT _DUSTX_VERSION_HPP MATCHES "kAppVersion = \"([0-9]+\\.[0-9]+\\.[0-9]+\\.[
 endif()
 set(DUSTX_APP_VERSION "${CMAKE_MATCH_1}")
 string(REPLACE "." "," DUSTX_APP_VERSION_COMMA "${DUSTX_APP_VERSION}")
+set(DUSTX_APP_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/windows/app.manifest")
+string(REPLACE "\\" "/" DUSTX_APP_MANIFEST "${DUSTX_APP_MANIFEST}")
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/windows/dustx.rc.in"
   "${CMAKE_CURRENT_BINARY_DIR}/dustx.rc"
@@ -197,7 +199,7 @@ elseif(WIN32)
   target_compile_definitions(DustX PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN "DUSTX_APP_VERSION=\"${DUSTX_APP_VERSION}\"")
   target_link_libraries(DustX PRIVATE
     "${WV2_LIB}"
-    ole32 oleaut32 uuid user32 gdi32 advapi32 shlwapi version strmiids iphlpapi ws2_32
+    ole32 oleaut32 uuid user32 gdi32 advapi32 shlwapi version strmiids iphlpapi ws2_32 shell32
   )
   FetchContent_Declare(
     wintun
