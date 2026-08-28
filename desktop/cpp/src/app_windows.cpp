@@ -384,8 +384,8 @@ void create_controller() {
                     wire_web(g_web.Get());
                     {
                       std::string unused;
-                      install_vcam(&unused);
-                      install_vmic(&unused);
+                      dustx::install_vcam(&unused);
+                      dustx::install_vmic(&unused);
                     }
                     navigate();
                     if (g_hwnd) SetTimer(g_hwnd, 1, 400, nullptr);
