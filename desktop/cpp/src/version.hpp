@@ -4,6 +4,6 @@
 
 namespace dustx {
 
-inline constexpr const char* kAppVersion = "2026.8.28.4";
+inline constexpr const char* kAppVersion = "2026.8.28.5";
 
 }  // namespace dustx

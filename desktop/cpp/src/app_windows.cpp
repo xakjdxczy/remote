@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <objbase.h>
 #include <wrl.h>
 #include <WebView2.h>
 
@@ -16,6 +17,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 using Microsoft::WRL::Callback;
@@ -28,6 +30,7 @@ constexpr UINT WM_DUSTX_CREATE_WEB = WM_APP + 22;
 constexpr UINT WM_DUSTX_RETRY_WEB = WM_APP + 23;
 constexpr UINT WM_DUSTX_WEBVIEW_FAIL = WM_APP + 24;
 constexpr UINT WM_DUSTX_WEB_READY = WM_APP + 25;
+constexpr UINT WM_DUSTX_WEB_RELOAD = WM_APP + 26;
 const HRESULT kWebViewInvalidState = HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
 
 HWND g_hwnd = nullptr;
@@ -37,9 +40,11 @@ ComPtr<ICoreWebView2> g_web;
 int g_port = 0;
 int g_nav_tries = 0;
 int g_webview_try = 0;
+int g_web_reloads = 0;
 bool g_allow_close = false;
 bool g_close_checking = false;
 bool g_nav_alerted = false;
+bool g_vcam_started = false;
 std::wstring g_data_dir;
 
 void create_controller();
@@ -47,6 +52,8 @@ void start_webview_env();
 void retry_webview();
 void fail_webview(HRESULT hr, const char* what);
 void finish_web_ui();
+void reload_webview();
+void start_vcam_once();
 
 struct ExtraWin {
   HWND hwnd = nullptr;
@@ -198,6 +205,7 @@ void wire_web(ICoreWebView2* web) {
             if (src) CoTaskMemFree(src);
             if (ok) {
               g_nav_tries = 0;
+              start_vcam_once();
               return S_OK;
             }
             if (g_nav_tries < 8) {
@@ -236,7 +244,15 @@ void wire_web(ICoreWebView2* web) {
             COREWEBVIEW2_PROCESS_FAILED_KIND kind = COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED;
             if (args) args->get_ProcessFailedKind(&kind);
             dustx::log_error("webview", "WebView2 进程失败 kind=" + std::to_string(static_cast<int>(kind)) + tid());
-            dustx::write_minidump(nullptr, "webview-process-failed");
+            char why[64];
+            std::snprintf(why, sizeof(why), "webview-process-failed-%d", static_cast<int>(kind));
+            dustx::write_minidump(nullptr, why, false);
+            if (kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED) {
+              if (g_hwnd) PostMessageW(g_hwnd, WM_DUSTX_WEB_RELOAD, static_cast<WPARAM>(kind), 0);
+            } else if (g_web) {
+              dustx::log_warn("webview", "渲染进程退出，Reload");
+              g_web->Reload();
+            }
             return S_OK;
           })
           .Get(),
@@ -315,6 +331,9 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     case WM_DUSTX_WEB_READY:
       finish_web_ui();
       return 0;
+    case WM_DUSTX_WEB_RELOAD:
+      reload_webview();
+      return 0;
     case WM_DUSTX_RETRY_WEB:
       retry_webview();
       return 0;
@@ -332,13 +351,6 @@ LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       } else if (wparam == 2) {
         KillTimer(hwnd, 2);
         retry_webview();
-      } else if (wparam == 3) {
-        KillTimer(hwnd, 3);
-        dustx::log_info("webview", "开始注册虚拟摄像头/麦克风" + tid());
-        std::string unused;
-        dustx::install_vcam(&unused);
-        dustx::install_vmic(&unused);
-        dustx::log_info("webview", "虚拟设备注册结束" + tid());
       }
       return 0;
     case WM_CLOSE:
@@ -405,7 +417,36 @@ void finish_web_ui() {
   dustx::log_info("webview", "已绑定事件，开始 Navigate" + tid());
   navigate();
   SetTimer(g_hwnd, 1, 400, nullptr);
-  SetTimer(g_hwnd, 3, 1200, nullptr);
+}
+
+void start_vcam_once() {
+  if (g_vcam_started) return;
+  g_vcam_started = true;
+  std::thread([] {
+    dustx::log_info("webview", "后台注册虚拟摄像头/麦克风");
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    std::string unused;
+    dustx::install_vcam(&unused);
+    dustx::install_vmic(&unused);
+    CoUninitialize();
+    dustx::log_info("webview", "后台虚拟设备注册结束");
+  }).detach();
+}
+
+void reload_webview() {
+  if (g_web_reloads >= 3) {
+    dustx::log_error("webview", "WebView2 多次退出，放弃重建");
+    dustx::alert_error("界面内核多次退出。\n请关掉尘埃X 后从官网重新下载。\n\n日志：" + dustx::log_file_path());
+    PostQuitMessage(1);
+    return;
+  }
+  g_web_reloads += 1;
+  dustx::log_warn("webview", "重建 WebView2 try=" + std::to_string(g_web_reloads) + tid());
+  g_web.Reset();
+  g_controller.Reset();
+  g_env.Reset();
+  g_nav_tries = 0;
+  start_webview_env();
 }
 
 void create_controller() {

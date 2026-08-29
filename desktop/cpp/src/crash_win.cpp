@@ -20,11 +20,16 @@ namespace {
 struct DumpJob {
   EXCEPTION_POINTERS* ep = nullptr;
   DWORD tid = 0;
+  HANDLE done = nullptr;
   wchar_t path[MAX_PATH]{};
+  char why[80]{};
+  DWORD code = 0;
 };
 
 LONG g_dumping = 0;
 wchar_t g_dir[MAX_PATH]{};
+
+bool dump_now(EXCEPTION_POINTERS* ep, const char* why, bool wait = true);
 
 void fill_dir() {
   if (g_dir[0]) return;
@@ -59,49 +64,55 @@ void write_note(const wchar_t* dump, const char* why, DWORD code) {
 DWORD WINAPI dump_thread(LPVOID raw) {
   auto* job = static_cast<DumpJob*>(raw);
   HANDLE file = CreateFileW(job->path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (file == INVALID_HANDLE_VALUE) return 1;
-  MINIDUMP_EXCEPTION_INFORMATION info{};
-  MINIDUMP_EXCEPTION_INFORMATION* infop = nullptr;
-  if (job->ep) {
-    info.ThreadId = job->tid;
-    info.ExceptionPointers = job->ep;
-    info.ClientPointers = FALSE;
-    infop = &info;
+  if (file != INVALID_HANDLE_VALUE) {
+    MINIDUMP_EXCEPTION_INFORMATION info{};
+    MINIDUMP_EXCEPTION_INFORMATION* infop = nullptr;
+    if (job->ep) {
+      info.ThreadId = job->tid;
+      info.ExceptionPointers = job->ep;
+      info.ClientPointers = FALSE;
+      infop = &info;
+    }
+    const auto type = static_cast<MINIDUMP_TYPE>(MiniDumpWithDataSegs | MiniDumpWithHandleData | MiniDumpWithThreadInfo |
+                                                 MiniDumpWithUnloadedModules | MiniDumpWithIndirectlyReferencedMemory);
+    MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, type, infop, nullptr, nullptr);
+    FlushFileBuffers(file);
+    CloseHandle(file);
   }
-  const auto type = static_cast<MINIDUMP_TYPE>(MiniDumpWithDataSegs | MiniDumpWithHandleData | MiniDumpWithThreadInfo |
-                                               MiniDumpWithUnloadedModules | MiniDumpWithIndirectlyReferencedMemory);
-  MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, type, infop, nullptr, nullptr);
-  FlushFileBuffers(file);
-  CloseHandle(file);
+  write_note(job->path, job->why, job->code);
+  char dmp_utf8[MAX_PATH * 3];
+  dmp_utf8[0] = 0;
+  WideCharToMultiByte(CP_UTF8, 0, job->path, -1, dmp_utf8, sizeof(dmp_utf8), nullptr, nullptr);
+  char line[700];
+  std::snprintf(line, sizeof(line), "写出崩溃转储 %s why=%s code=0x%08X", dmp_utf8, job->why, static_cast<unsigned>(job->code));
+  log_error("crash", line);
+  if (job->done) SetEvent(job->done);
+  delete job;
+  InterlockedExchange(&g_dumping, 0);
   return 0;
 }
 
-bool dump_now(EXCEPTION_POINTERS* ep, const char* why) {
+bool dump_now(EXCEPTION_POINTERS* ep, const char* why, bool wait) {
   if (InterlockedCompareExchange(&g_dumping, 1, 0) != 0) return false;
   fill_dir();
   SYSTEMTIME st{};
   GetLocalTime(&st);
-  DumpJob job;
-  job.ep = ep;
-  job.tid = GetCurrentThreadId();
-  _snwprintf_s(job.path, _TRUNCATE, L"%s\\crash-%04d%02d%02d-%02d%02d%02d-%lu.dmp", g_dir, st.wYear, st.wMonth, st.wDay,
+  auto* job = new DumpJob();
+  job->ep = ep;
+  job->tid = GetCurrentThreadId();
+  job->code = (ep && ep->ExceptionRecord) ? ep->ExceptionRecord->ExceptionCode : 0;
+  if (why) strncpy_s(job->why, why, _TRUNCATE);
+  _snwprintf_s(job->path, _TRUNCATE, L"%s\\crash-%04d%02d%02d-%02d%02d%02d-%lu.dmp", g_dir, st.wYear, st.wMonth, st.wDay,
                st.wHour, st.wMinute, st.wSecond, GetCurrentProcessId());
-  const DWORD code = (ep && ep->ExceptionRecord) ? ep->ExceptionRecord->ExceptionCode : 0;
-  HANDLE th = CreateThread(nullptr, 0, dump_thread, &job, 0, nullptr);
-  if (th) {
-    WaitForSingleObject(th, 20000);
-    CloseHandle(th);
-  } else {
-    dump_thread(&job);
+  HANDLE done = wait ? CreateEventW(nullptr, TRUE, FALSE, nullptr) : nullptr;
+  job->done = done;
+  HANDLE th = CreateThread(nullptr, 0, dump_thread, job, 0, nullptr);
+  if (!th) dump_thread(job);
+  else CloseHandle(th);
+  if (done) {
+    WaitForSingleObject(done, 20000);
+    CloseHandle(done);
   }
-  write_note(job.path, why, code);
-  char dmp_utf8[MAX_PATH * 3];
-  dmp_utf8[0] = 0;
-  WideCharToMultiByte(CP_UTF8, 0, job.path, -1, dmp_utf8, sizeof(dmp_utf8), nullptr, nullptr);
-  char line[700];
-  std::snprintf(line, sizeof(line), "写出崩溃转储 %s why=%s code=0x%08X", dmp_utf8, why ? why : "?",
-                static_cast<unsigned>(code));
-  log_error("crash", line);
   return true;
 }
 
@@ -165,6 +176,6 @@ std::string crash_dir() {
   return utf8;
 }
 
-bool write_minidump(EXCEPTION_POINTERS* ep, const char* why) { return dump_now(ep, why); }
+bool write_minidump(EXCEPTION_POINTERS* ep, const char* why, bool wait) { return dump_now(ep, why, wait); }
 
 }  // namespace dustx
