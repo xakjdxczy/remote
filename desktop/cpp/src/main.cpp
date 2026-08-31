@@ -17,7 +17,7 @@
 #include <string>
 
 static int dustx_main() {
-  dustx::log_info("app", std::string("尘埃X 启动 ") + dustx::kAppVersion);
+  dustx::log_info("app", std::string("尘埃 启动 ") + dustx::kAppVersion);
   dustx::log_info("app", std::string("日志文件 ") + dustx::log_file_path());
 #ifdef _WIN32
   dustx::log_info("app", "pid=" + std::to_string(GetCurrentProcessId()) + " 崩溃目录 " + dustx::crash_dir());
@@ -30,7 +30,7 @@ static int dustx_main() {
   }
   if (!server.has_shell_ui()) {
     dustx::log_error("app", "缺少界面文件 " + server.web_dir() + "/shell.html");
-    dustx::alert_error("界面文件缺失，窗口会是白屏。\n请重新下载安装尘埃X。\n\n目录：" + server.web_dir() +
+    dustx::alert_error("界面文件缺失，窗口会是白屏。\n请重新下载安装尘埃。\n\n目录：" + server.web_dir() +
                        "\n日志：" + dustx::log_file_path());
   }
   dustx::start_update_watcher();

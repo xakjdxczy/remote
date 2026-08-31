@@ -138,7 +138,7 @@ class KeepAliveService : Service(), SignalingClient.Callbacks {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notif = Notification.Builder(this, CHANNEL)
-            .setContentTitle("尘埃X 远程在线")
+            .setContentTitle("尘埃 远程在线")
             .setContentText("切到后台也会保持连接，等待远程协助")
             .setSmallIcon(R.drawable.ic_logo)
             .setContentIntent(open)
@@ -162,7 +162,7 @@ class KeepAliveService : Service(), SignalingClient.Callbacks {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notif = Notification.Builder(this, CHANNEL)
-            .setContentTitle("尘埃X 远程在线")
+            .setContentTitle("尘埃 远程在线")
             .setContentText("远程码 ${Ids.formatId(deviceId)} · 后台保持连接")
             .setSmallIcon(R.drawable.ic_logo)
             .setContentIntent(open)

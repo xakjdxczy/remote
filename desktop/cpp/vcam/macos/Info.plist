@@ -11,9 +11,9 @@
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>尘埃X 摄像头</string>
+  <string>尘埃 摄像头</string>
   <key>CFBundleDisplayName</key>
-  <string>尘埃X 摄像头</string>
+  <string>尘埃 摄像头</string>
   <key>CFBundlePackageType</key>
   <string>SYSX</string>
   <key>CFBundleShortVersionString</key>
@@ -23,7 +23,7 @@
   <key>LSMinimumSystemVersion</key>
   <string>12.3</string>
   <key>NSSystemExtensionUsageDescription</key>
-  <string>尘埃X 提供自己的虚拟摄像头，会议软件才能选到「尘埃X 摄像头」。</string>
+  <string>尘埃 提供自己的虚拟摄像头，会议软件才能选到「尘埃 摄像头」。</string>
   <key>CMIOExtension</key>
   <dict>
     <key>CMIOExtensionMachServiceName</key>

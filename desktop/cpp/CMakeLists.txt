@@ -53,7 +53,7 @@ if(APPLE)
     BUNDLE_EXTENSION systemextension
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/vcam/macos/Info.plist"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.dustx.remotedesk.camera"
-    MACOSX_BUNDLE_BUNDLE_NAME "尘埃X 摄像头"
+    MACOSX_BUNDLE_BUNDLE_NAME "尘埃 摄像头"
   )
   target_link_libraries(DustXCamera PRIVATE
     "-framework Foundation"
@@ -96,10 +96,10 @@ if(APPLE)
   add_dependencies(DustX DustXCamPlugin)
   add_dependencies(DustX DustXCamera)
   set_target_properties(DustX PROPERTIES
-    OUTPUT_NAME "尘埃X"
+    OUTPUT_NAME "尘埃"
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist"
-    MACOSX_BUNDLE_BUNDLE_NAME "尘埃X"
+    MACOSX_BUNDLE_BUNDLE_NAME "尘埃"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.dustx.remotedesk"
   )
   target_link_libraries(DustX PRIVATE

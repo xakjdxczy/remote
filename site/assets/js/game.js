@@ -1,4 +1,4 @@
-/* 字母陨石 · 26键大冒险 — 尘埃X
+/* 字母陨石 · 26键大冒险 — 黄土坡
  * Canvas meteor game with WebAudio synth sounds.
  * Mechanics: type the falling letter to destroy it. Faster presses => higher
  * attack power; consecutive hits build combo multiplier. Missed meteors / wrong

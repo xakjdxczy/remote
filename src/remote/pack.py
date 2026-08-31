@@ -28,8 +28,8 @@ def main() -> None:
     subprocess.check_call(cmd, cwd=root)
 
     if sys.platform == "darwin":
-        built = root / "dist" / "尘埃X.app"
-        dest = root / "desktop" / "mac" / "尘埃X.app"
+        built = root / "dist" / "尘埃.app"
+        dest = root / "desktop" / "mac" / "尘埃.app"
     else:
         built = root / "dist" / "DustX"
         dest = root / "desktop" / "windows" / "DustX"

@@ -283,7 +283,7 @@ class ScreenCaptureService : Service() {
             mgr.createNotificationChannel(NotificationChannel(CHANNEL, "远程被控", NotificationManager.IMPORTANCE_LOW))
         }
         val notif: Notification = Notification.Builder(this, CHANNEL)
-            .setContentTitle("尘埃X 远程被控运行中")
+            .setContentTitle("尘埃远程被控运行中")
             .setContentText("本机屏幕可被授权的控制端查看/操作")
             .setSmallIcon(R.drawable.ic_logo)
             .setOngoing(true)

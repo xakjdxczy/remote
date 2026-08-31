@@ -55,7 +55,7 @@ namespace dustx {
 
 bool install_vcam(std::string* message) {
   if (exists(@"/Library/CoreMediaIO/Plug-Ins/DAL/DustXCam.plugin")) {
-    if (message) *message = "尘埃X 摄像头已安装。OBS / 会议软件请选「尘埃X 摄像头」。";
+    if (message) *message = "尘埃 摄像头已安装。OBS / 会议软件请选「尘埃 摄像头」。";
     return true;
   }
   NSString* cam = resource_bundle(@"DustXCam", @"plugin");
@@ -66,14 +66,14 @@ bool install_vcam(std::string* message) {
   NSString* mic = resource_bundle(@"DustXMic", @"driver");
   copy_plugins_async(cam, exists(mic) ? mic : nil, true, !exists(@"/Library/Audio/Plug-Ins/HAL/DustXMic.driver") && exists(mic));
   if (message) {
-    *message = "正在请求管理员权限安装「尘埃X 摄像头」。允许后重新打开 OBS，选视频采集设备。";
+    *message = "正在请求管理员权限安装「尘埃 摄像头」。允许后重新打开 OBS，选视频采集设备。";
   }
   return true;
 }
 
 bool install_vmic(std::string* message) {
   if (exists(@"/Library/Audio/Plug-Ins/HAL/DustXMic.driver")) {
-    if (message) *message = "尘埃X 麦克风已安装。会议软件请选「尘埃X 麦克风」。";
+    if (message) *message = "尘埃 麦克风已安装。会议软件请选「尘埃 麦克风」。";
     return true;
   }
   NSString* mic = resource_bundle(@"DustXMic", @"driver");
@@ -83,7 +83,7 @@ bool install_vmic(std::string* message) {
   }
   NSString* cam = resource_bundle(@"DustXCam", @"plugin");
   copy_plugins_async(cam, mic, exists(cam) && !exists(@"/Library/CoreMediaIO/Plug-Ins/DAL/DustXCam.plugin"), true);
-  if (message) *message = "正在请求管理员权限安装「尘埃X 麦克风」。";
+  if (message) *message = "正在请求管理员权限安装「尘埃 麦克风」。";
   return true;
 }
 

@@ -145,7 +145,7 @@ static const int kH = dustx::kVcamHeight;
   self = [super init];
   if (!self) return nil;
   _streamSource = [DustXStreamSource new];
-  _stream = [CMIOExtensionStream streamWithLocalizedName:@"尘埃X"
+  _stream = [CMIOExtensionStream streamWithLocalizedName:@"尘埃"
                                                  streamID:[[NSUUID alloc] initWithUUIDString:@"A71C3E80-6D42-4F1B-9E3A-C4D8B2E91F71"]
                                                 direction:CMIOExtensionStreamDirectionSource
                                                 clockType:CMIOExtensionStreamClockTypeHostTime
@@ -162,7 +162,7 @@ static const int kH = dustx::kVcamHeight;
                                                           error:(NSError**)outError {
   (void)outError;
   CMIOExtensionDeviceProperties* props = [CMIOExtensionDeviceProperties devicePropertiesWithDictionary:@{}];
-  if ([properties containsObject:CMIOExtensionPropertyDeviceModel]) props.model = @"尘埃X 摄像头";
+  if ([properties containsObject:CMIOExtensionPropertyDeviceModel]) props.model = @"尘埃 摄像头";
   return props;
 }
 
@@ -185,7 +185,7 @@ static const int kH = dustx::kVcamHeight;
   if (!self) return nil;
   _provider = [[CMIOExtensionProvider alloc] initWithSource:self clientQueue:nil];
   _deviceSource = [DustXDeviceSource new];
-  _device = [CMIOExtensionDevice deviceWithLocalizedName:@"尘埃X 摄像头"
+  _device = [CMIOExtensionDevice deviceWithLocalizedName:@"尘埃 摄像头"
                                                 deviceID:[[NSUUID alloc] initWithUUIDString:@"A71C3E80-6D42-4F1B-9E3A-C4D8B2E91F70"]
                                           legacyDeviceID:@"dustx-camera"
                                                   source:_deviceSource];
@@ -212,7 +212,7 @@ static const int kH = dustx::kVcamHeight;
                                                               error:(NSError**)outError {
   (void)outError;
   CMIOExtensionProviderProperties* props = [CMIOExtensionProviderProperties providerPropertiesWithDictionary:@{}];
-  if ([properties containsObject:CMIOExtensionPropertyProviderManufacturer]) props.manufacturer = @"尘埃X";
+  if ([properties containsObject:CMIOExtensionPropertyProviderManufacturer]) props.manufacturer = @"尘埃";
   return props;
 }
 

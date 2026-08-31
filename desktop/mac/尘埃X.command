@@ -2,9 +2,9 @@
 set -e
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 for APP in \
-  "$ROOT/desktop/cpp/build/尘埃X.app" \
-  "$ROOT/desktop/mac/尘埃X.app" \
-  "$ROOT/dist/尘埃X.app"
+  "$ROOT/desktop/cpp/build/尘埃.app" \
+  "$ROOT/desktop/mac/尘埃.app" \
+  "$ROOT/dist/尘埃.app"
 do
   if [[ -d "$APP" ]]; then
     exec open "$APP"

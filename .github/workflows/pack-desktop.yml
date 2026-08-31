@@ -22,12 +22,12 @@ jobs:
       - name: Stage app
         run: |
           mkdir -p artifact
-          ditto desktop/cpp/build/尘埃X.app artifact/尘埃X.app
+          ditto desktop/cpp/build/尘埃.app artifact/尘埃.app
 
       - uses: actions/upload-artifact@v4
         with:
           name: DustX-macos
-          path: artifact/尘埃X.app
+          path: artifact/尘埃.app
           if-no-files-found: error
           retention-days: 14
 

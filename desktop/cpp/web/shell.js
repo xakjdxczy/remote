@@ -552,7 +552,7 @@ function renderSpecs(dev) {
   const presence = dev.kind === "self" ? { online: true, ip: "", last_seen: 0 } : (state.presence[dev.id] || {});
   const info = specInfo(dev);
   const rows = [];
-  if (info.version) rows.push(["尘埃X", info.version]);
+  if (info.version) rows.push(["尘埃", info.version]);
   if (info.model) rows.push(["机型", info.model]);
   if (info.cpu) {
     const cores = info.cpu_cores ? ` · ${info.cpu_cores} 核` : "";
@@ -590,7 +590,7 @@ function renderSpecs(dev) {
   if (!rows.length) {
     box.hidden = false;
     box.innerHTML = `<div class="specs-head"><h3>设备信息</h3></div>
-      <p class="muted">${dev.kind === "self" ? "正在读取本机硬件…" : (presence.online ? "对方还没上报硬件信息，需要新版尘埃X。" : "离线时会显示上次在线记下的配置。")}</p>`;
+      <p class="muted">${dev.kind === "self" ? "正在读取本机硬件…" : (presence.online ? "对方还没上报硬件信息，需要新版尘埃。" : "离线时会显示上次在线记下的配置。")}</p>`;
     return;
   }
   box.hidden = false;
@@ -640,7 +640,7 @@ function renderDeviceList() {
     const tag = tone && tone !== "online"
       ? `<span class="phase-tag ${tone}">${esc(link.parts && link.parts[0] ? link.parts[0].phase : link.label)}</span>`
       : (d.kind === "self" ? "<span class=\"tag\">本设备</span>" : `<span class="kicker">${formatId(d.id)}</span>`);
-    const verTag = ver ? `<span class="device-ver" title="尘埃X 版本">${esc(ver)}</span>` : "";
+    const verTag = ver ? `<span class="device-ver" title="尘埃 版本">${esc(ver)}</span>` : "";
     const del = d.kind === "self" ? "" : `<button type="button" class="device-del" data-forget-key="${esc(d.key)}" title="从本机列表删除">删除</button>`;
     return `<div class="device-row${d.key === state.selected ? " is-on" : ""}${tone ? ` is-${tone}` : ""}" data-key="${esc(d.key)}">
       <span class="live ${tone || (online ? "on" : "")}"></span>

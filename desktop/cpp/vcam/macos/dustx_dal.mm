@@ -321,10 +321,10 @@ OSStatus ObjectGetPropertyData(CMIOHardwarePlugInRef, CMIOObjectID objectID, con
   };
   switch (address->mSelector) {
     case kCMIOObjectPropertyName:
-      set_str(k == kKindStream ? CFSTR("尘埃X") : CFSTR("尘埃X 摄像头"));
+      set_str(k == kKindStream ? CFSTR("尘埃") : CFSTR("尘埃 摄像头"));
       return kCMIOHardwareNoError;
     case kCMIOObjectPropertyManufacturer:
-      set_str(CFSTR("尘埃X"));
+      set_str(CFSTR("尘埃"));
       return kCMIOHardwareNoError;
     case kCMIODevicePropertyPlugIn:
       *static_cast<CMIOObjectID*>(data) = g.plugin;

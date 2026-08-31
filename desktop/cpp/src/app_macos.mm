@@ -43,7 +43,7 @@ static void apply_store_proxy(WKWebsiteDataStore* store, bool use_system) {
                           NSWindowStyleMaskResizable
                   backing:NSBackingStoreBuffered
                     defer:NO];
-  self.window.title = @"尘埃X";
+  self.window.title = @"尘埃";
   self.window.minSize = NSMakeSize(960, 640);
   self.window.delegate = self;
   self.window.animationBehavior = NSWindowAnimationBehaviorNone;
@@ -64,7 +64,7 @@ static void apply_store_proxy(WKWebsiteDataStore* store, bool use_system) {
   NSMenuItem* appItem = [NSMenuItem new];
   [menubar addItem:appItem];
   NSMenu* appMenu = [NSMenu new];
-  [appMenu addItemWithTitle:@"退出尘埃X" action:@selector(terminate:) keyEquivalent:@"q"];
+  [appMenu addItemWithTitle:@"退出尘埃" action:@selector(terminate:) keyEquivalent:@"q"];
   appItem.submenu = appMenu;
   NSApp.mainMenu = menubar;
 
@@ -98,7 +98,7 @@ static void apply_store_proxy(WKWebsiteDataStore* store, bool use_system) {
                }
                NSAlert* alert = [NSAlert new];
                alert.alertStyle = NSAlertStyleWarning;
-               alert.messageText = @"确定关闭尘埃X？";
+               alert.messageText = @"确定关闭尘埃？";
                if (what.length) {
                  alert.informativeText =
                      [NSString stringWithFormat:@"当前还有连接：%@。关闭后这些连接会断开。", what];
@@ -137,7 +137,7 @@ static void apply_store_proxy(WKWebsiteDataStore* store, bool use_system) {
   else if ([path containsString:@"term"]) extra.title = @"终端";
   else if ([path containsString:@"webcam"] || [path containsString:@"camera"] || [path containsString:@"mode=camera"])
     extra.title = @"摄像头";
-  else extra.title = @"尘埃X";
+  else extra.title = @"尘埃";
   WKWebView* child = [[WKWebView alloc] initWithFrame:extra.contentView.bounds configuration:configuration];
   child.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   child.navigationDelegate = self;
@@ -222,7 +222,7 @@ void alert_error(const std::string& text) {
   @autoreleasepool {
     NSAlert* alert = [NSAlert new];
     alert.alertStyle = NSAlertStyleCritical;
-    alert.messageText = @"尘埃X";
+    alert.messageText = @"尘埃";
     alert.informativeText = [NSString stringWithUTF8String:text.c_str()] ?: @"";
     [alert runModal];
   }

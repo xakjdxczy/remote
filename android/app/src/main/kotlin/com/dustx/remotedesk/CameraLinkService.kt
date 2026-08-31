@@ -175,7 +175,7 @@ class CameraLinkService : Service() {
             )
         }
         val n = NotificationCompat.Builder(this, CHANNEL)
-            .setContentTitle("尘埃X")
+            .setContentTitle("尘埃")
             .setContentText("正在作为电脑摄像头")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)

@@ -22,7 +22,7 @@ enum {
 
 const Float64 kRate = 48000;
 const UInt32 kCh = 1;
-const CFStringRef kName = CFSTR("尘埃X 麦克风");
+const CFStringRef kName = CFSTR("尘埃 麦克风");
 const CFStringRef kUid = CFSTR("com.dustx.remotedesk.mic");
 const CFStringRef kBoxUid = CFSTR("com.dustx.remotedesk.mic.box");
 const CFStringRef kStreamUid = CFSTR("com.dustx.remotedesk.mic.input");
@@ -263,7 +263,7 @@ OSStatus get_prop(AudioServerPlugInDriverRef, AudioObjectID obj, pid_t, const Au
     return kAudioHardwareNoError;
   }
   if (sel == kAudioObjectPropertyManufacturer || sel == kAudioObjectPropertyName) {
-    *reinterpret_cast<CFStringRef*>(out) = static_cast<CFStringRef>(CFRetain(sel == kAudioObjectPropertyName ? kName : CFSTR("尘埃X")));
+    *reinterpret_cast<CFStringRef*>(out) = static_cast<CFStringRef>(CFRetain(sel == kAudioObjectPropertyName ? kName : CFSTR("尘埃")));
     *size = sizeof(CFStringRef);
     return kAudioHardwareNoError;
   }

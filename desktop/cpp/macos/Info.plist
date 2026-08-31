@@ -5,15 +5,15 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>zh-Hans</string>
   <key>CFBundleExecutable</key>
-  <string>尘埃X</string>
+  <string>尘埃</string>
   <key>CFBundleIdentifier</key>
   <string>com.dustx.remotedesk</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>尘埃X</string>
+  <string>尘埃</string>
   <key>CFBundleDisplayName</key>
-  <string>尘埃X</string>
+  <string>尘埃</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -25,13 +25,13 @@
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSCameraUsageDescription</key>
-  <string>尘埃X 通过摄像头让对方看到这台电脑的画面，或预览本机摄像头。</string>
+  <string>尘埃 通过摄像头让对方看到这台电脑的画面，或预览本机摄像头。</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>尘埃X 在共享摄像头或手机作为摄像头时使用麦克风。</string>
+  <string>尘埃 在共享摄像头或手机作为摄像头时使用麦克风。</string>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>尘埃X 通过局域网或 USB 连接手机摄像头，流量不经过公网。</string>
+  <string>尘埃 通过局域网或 USB 连接手机摄像头，流量不经过公网。</string>
   <key>NSSystemExtensionUsageDescription</key>
-  <string>尘埃X 会安装自己的虚拟摄像头，会议软件才能选到「尘埃X 摄像头」。</string>
+  <string>尘埃 会安装自己的虚拟摄像头，会议软件才能选到「尘埃 摄像头」。</string>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>

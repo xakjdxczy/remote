@@ -1,4 +1,4 @@
-// Dust particle background for 尘埃X. Lightweight canvas animation.
+// Dust particle background for 黄土坡. Lightweight canvas animation.
 (function () {
   document.getElementById("year").textContent = new Date().getFullYear();
 

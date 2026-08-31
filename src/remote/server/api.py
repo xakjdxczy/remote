@@ -153,7 +153,7 @@ def desktop_features_enabled() -> bool:
 
 def _require_desktop() -> None:
     if not desktop_features_enabled():
-        raise HTTPException(status_code=404, detail="手机摄像头仅在尘埃X桌面程序中可用")
+        raise HTTPException(status_code=404, detail="手机摄像头仅在尘埃桌面程序中可用")
 
 
 _RELAY_LOG = os.environ.get("COTURN_LOG", "/var/log/turnserver/turn.log")
@@ -395,7 +395,7 @@ def create_app() -> FastAPI:
     @app.websocket("/cam/ws")
     async def cam_ws(ws: WebSocket) -> None:
         if not desktop_features_enabled():
-            raise HTTPException(status_code=404, detail="手机摄像头仅在尘埃X桌面程序中可用")
+            raise HTTPException(status_code=404, detail="手机摄像头仅在尘埃桌面程序中可用")
         await ws.accept()
         attached = False
         try:

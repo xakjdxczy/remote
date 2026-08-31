@@ -131,7 +131,7 @@ void open_extra(const std::wstring& uri) {
   if (!g_env) return;
   auto extra = std::make_unique<ExtraWin>();
   ExtraWin* raw = extra.get();
-  raw->hwnd = CreateWindowExW(0, L"DustXExtraWnd", L"尘埃X", WS_OVERLAPPEDWINDOW, 160, 80, 1100, 740, nullptr, nullptr,
+  raw->hwnd = CreateWindowExW(0, L"DustXExtraWnd", L"尘埃", WS_OVERLAPPEDWINDOW, 160, 80, 1100, 740, nullptr, nullptr,
                               GetModuleHandleW(nullptr), nullptr);
   if (!raw->hwnd) return;
   SetWindowLongPtrW(raw->hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(raw));
@@ -216,7 +216,7 @@ void wire_web(ICoreWebView2* web) {
               g_nav_alerted = true;
               dustx::log_error("webview", "界面多次打开失败，窗口会是白屏");
               dustx::alert_error(
-                  "无法打开本机界面，窗口是白屏。\n请关掉已打开的尘埃X，删掉 %LOCALAPPDATA%\\DustX 下的 WebView2 目录后再开，"
+                  "无法打开本机界面，窗口是白屏。\n请关掉已打开的尘埃，删掉 %LOCALAPPDATA%\\DustX 下的 WebView2 目录后再开，"
                   "或重新下载安装。\n\n日志：" +
                   dustx::log_file_path());
             }
@@ -291,8 +291,8 @@ void ask_close_then_destroy() {
         if (confirm) {
           std::wstring body = L"当前还有连接";
           if (!what.empty()) body += L"：" + what;
-          body += L"。\n关闭后这些连接会断开。\n\n确定关闭尘埃X？";
-          if (MessageBoxW(g_hwnd, body.c_str(), L"尘埃X", MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2) != IDOK) {
+          body += L"。\n关闭后这些连接会断开。\n\n确定关闭尘埃？";
+          if (MessageBoxW(g_hwnd, body.c_str(), L"尘埃", MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2) != IDOK) {
             return S_OK;
           }
         }
@@ -436,7 +436,7 @@ void start_vcam_once() {
 void reload_webview() {
   if (g_web_reloads >= 3) {
     dustx::log_error("webview", "WebView2 多次退出，放弃重建");
-    dustx::alert_error("界面内核多次退出。\n请关掉尘埃X 后从官网重新下载。\n\n日志：" + dustx::log_file_path());
+    dustx::alert_error("界面内核多次退出。\n请关掉尘埃 后从官网重新下载。\n\n日志：" + dustx::log_file_path());
     PostQuitMessage(1);
     return;
   }
@@ -534,7 +534,7 @@ int run_native_app(int port) {
   extra_wc.lpszClassName = L"DustXExtraWnd";
   RegisterClassW(&extra_wc);
 
-  g_hwnd = CreateWindowExW(0, L"DustXWnd", L"尘埃X", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1280, 820,
+  g_hwnd = CreateWindowExW(0, L"DustXWnd", L"尘埃", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1280, 820,
                            nullptr, nullptr, wc.hInstance, nullptr);
   ShowWindow(g_hwnd, SW_SHOW);
   UpdateWindow(g_hwnd);

@@ -88,12 +88,12 @@ bool VirtualIO::start() {
     }
   });
   if (cam_ok_ && mic_ok_) {
-    message_ = cam_note_.empty() ? "已输出到「尘埃X 摄像头」和「尘埃X 麦克风」。OBS / 会议软件请选这两个设备。"
-                                 : cam_note_ + " 麦克风请选「尘埃X 麦克风」。";
+    message_ = cam_note_.empty() ? "已输出到「尘埃 摄像头」和「尘埃 麦克风」。OBS / 会议软件请选这两个设备。"
+                                 : cam_note_ + " 麦克风请选「尘埃 麦克风」。";
   } else if (cam_ok_) {
-    message_ = cam_note_.empty() ? "尘埃X 摄像头已打开，虚拟麦克风还没装上。" : cam_note_;
+    message_ = cam_note_.empty() ? "尘埃 摄像头已打开，虚拟麦克风还没装上。" : cam_note_;
   } else if (mic_ok_) {
-    message_ = "尘埃X 麦克风已打开，摄像头扩展还没被系统认到。";
+    message_ = "尘埃 麦克风已打开，摄像头扩展还没被系统认到。";
   } else {
     message_ = "虚拟设备没有打开。窗口预览仍可用。";
   }
