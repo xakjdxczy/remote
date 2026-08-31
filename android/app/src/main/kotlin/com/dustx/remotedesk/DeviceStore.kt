@@ -28,7 +28,7 @@ object DeviceStore {
 
     fun serverUrl(ctx: Context): String =
         prefs(ctx).getString("server_url", "")?.ifBlank { null }
-            ?: "wss://117.72.108.246/ws"
+            ?: "wss://loessx.com/ws"
 
     fun setServerUrl(ctx: Context, url: String) {
         prefs(ctx).edit().putString("server_url", url).apply()

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 
-OFFICIAL_WS = "wss://117.72.108.246/ws"
-OFFICIAL_HTTP = "https://117.72.108.246"
+OFFICIAL_WS = "wss://loessx.com/ws"
+OFFICIAL_HTTP = "https://loessx.com"
 
 
 def official_ws() -> str:

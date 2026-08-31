@@ -320,6 +320,6 @@ class ScreenCaptureService : Service() {
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_DATA = "data"
         const val EXTRA_URL = "url"
-        const val DEFAULT_URL = "wss://117.72.108.246/ws"
+        const val DEFAULT_URL = "wss://loessx.com/ws"
     }
 }

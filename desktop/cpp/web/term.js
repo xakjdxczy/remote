@@ -69,7 +69,7 @@ async function boot() {
     const app = await (await fetch("/api/app")).json();
     state.signalHttp = app.signal_http || "";
   } catch { /* ignore */ }
-  if (!state.signalHttp) state.signalHttp = "https://117.72.108.246";
+  if (!state.signalHttp) state.signalHttp = "https://loessx.com";
   if (!state.fromId && !state.local) {
     try {
       const mesh = await (await fetch("/api/mesh")).json();

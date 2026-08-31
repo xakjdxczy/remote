@@ -218,7 +218,7 @@ std::string base64_decode(const std::string& data) {
 std::string signaling_http_origin() {
   std::string url = remote_console_url();
   auto scheme = url.find("://");
-  if (scheme == std::string::npos) return "https://117.72.108.246";
+  if (scheme == std::string::npos) return "https://loessx.com";
   auto slash = url.find('/', scheme + 3);
   return slash == std::string::npos ? url : url.substr(0, slash);
 }
@@ -227,7 +227,7 @@ std::string signaling_ws_url() {
   std::string origin = signaling_http_origin();
   if (origin.rfind("https://", 0) == 0) return "wss://" + origin.substr(8) + "/ws";
   if (origin.rfind("http://", 0) == 0) return "ws://" + origin.substr(7) + "/ws";
-  return "wss://117.72.108.246/ws";
+  return "wss://loessx.com/ws";
 }
 
 std::string ice_servers_json() {
@@ -335,7 +335,7 @@ std::string getenv_or(const char* key, const char* fallback) {
 }
 
 std::string remote_console_url() {
-  return getenv_or("DUSTX_REMOTE_URL", "https://117.72.108.246/remote/");
+  return getenv_or("DUSTX_REMOTE_URL", "https://loessx.com/remote/");
 }
 
 int default_listen_port() {

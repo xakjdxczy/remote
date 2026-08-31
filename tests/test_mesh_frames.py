@@ -11,7 +11,7 @@ def test_mesh_frames_roundtrip():
 
 
 def test_ws_to_http():
-    assert ws_to_http("wss://117.72.108.246/ws") == "https://117.72.108.246"
+    assert ws_to_http("wss://loessx.com/ws") == "https://loessx.com"
     assert ws_to_http("ws://127.0.0.1:8080/ws") == "http://127.0.0.1:8080"
     assert official_ws().endswith("/ws")
     assert "://" in official_http()
