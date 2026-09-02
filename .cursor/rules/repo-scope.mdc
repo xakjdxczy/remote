@@ -1,0 +1,12 @@
+---
+description: 本仓库只做尘埃；官网在 loessx-vps
+alwaysApply: true
+---
+
+# remote 仓库范围
+
+只改尘埃（信令、桌面、Android、OSS 上传）。官网、nginx、`/var/www/chenaix` 在同级 `loessx-vps`。
+
+- 不要在本仓库加回 `site/`。
+- 信令上机用 `./scripts/publish-server.sh`，不要整树删除 `/opt/remotedesk`。
+- 强制更新顺序见 `desktop-publish`；Windows 直传见 `windows-oss-upload`。

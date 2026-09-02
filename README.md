@@ -1,17 +1,22 @@
-# 尘埃X (DUST-X)
+# 尘埃
 
-本仓库是「尘埃X」品牌的产品单体仓库，包含官网、字母陨石打字游戏、RemoteDesk 远程协助工具（含网页控制端、信令服务、跨平台被控端与原生 Android App），以及最初用于搭建开发环境的 Tasks 起步应用。
+本仓库只做远程软件**尘埃**：信令、网页控制端、桌面被控端、Android 被控端。
+
+官网（黄土坡、字母陨石）在同级仓库 [`loessx-vps`](https://github.com/xakjdxczy/loessx-vps)，发到 `/var/www/chenaix`。本仓库不要再加 `site/`。
+
+信令上机：`./scripts/publish-server.sh`（拷到 VPS `/opt/remotedesk/`，再重启 `remotedesk`）。
 
 ## 目录结构
 
 | 目录 | 内容 |
 | --- | --- |
-| `site/` | 尘埃X 官网首页 + 26 键「字母陨石」打字游戏（静态站点） |
-| `src/` | RemoteDesk：信令服务、网页控制端、跨平台被控端（Python） |
-| `android/` | RemoteDesk 原生 Android 被控端 App（Kotlin，MediaProjection + 无障碍注入 + 原生 WebRTC） |
-| `tests/` | RemoteDesk 的 pytest 测试 |
-| `client/` `server/` | 最初的全栈 Tasks 起步应用（用于验证开发环境） |
-| `Dockerfile` `docker-compose.yml` | RemoteDesk 信令服务容器化 |
+| `src/` | 信令服务、网页控制端、跨平台被控端（Python） |
+| `desktop/` | macOS / Windows 原生桌面程序 |
+| `android/` | 原生 Android 被控端（Kotlin，MediaProjection + 无障碍 + WebRTC） |
+| `tests/` | pytest |
+| `client/` `server/` | 最初的 Tasks 起步应用（验证开发环境，不是产品） |
+| `Dockerfile` `docker-compose.yml` | 信令容器化 |
+| `scripts/publish-server.sh` | 把 `src/remote/` 发到 VPS |
 
 ---
 
@@ -154,7 +159,7 @@ python -m remote upload-apk android/app/build/outputs/apk/debug/app-debug.apk \
 python -m remote server
 ```
 
-官网静态页与信令同域时，Nginx 把 `/api/` 反代到信令即可。接口：
+官网静态页在 `loessx-vps`，与信令同域。Nginx 把 `/api/` 反代到信令。接口：
 
 - `GET /api/downloads/android|macos|windows` → JSON（`url` / `filename` / `version`）
 - `GET /api/downloads/<kind>?redirect=1` → 302 到签名 URL
