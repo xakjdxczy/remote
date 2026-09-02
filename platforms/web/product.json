@@ -1,0 +1,42 @@
+{
+  "protocol": "loessx-product/1",
+  "slug": "chenai",
+  "name": "尘埃",
+  "tagline": "授权后 P2P 远程控制",
+  "intro": "识别码 + 临时密码即可连接。画面、键鼠、文件只走 WebRTC P2P，信令不转发媒体。只用于设备主人同意后的协助，禁止未授权控制他人电脑。网页控制台只做远程控制；手机当摄像头请用本机尘埃桌面程序（局域网或 USB）。被控端提供 Windows / macOS / 安卓。",
+  "href": "/chenai/",
+  "status": "live",
+  "tag": "工具 · 已上线",
+  "emoji": "🖥",
+  "title": "尘埃远程控制 ｜ 黄土坡",
+  "platforms": [
+    {
+      "id": "console",
+      "label": "网页控制台",
+      "kind": "page",
+      "href": "/remote/",
+      "note": "浏览器里输入识别码和临时密码。控制台不做安装包分发。"
+    },
+    {
+      "id": "macos",
+      "label": "macOS",
+      "kind": "file",
+      "href": "/api/downloads/macos?redirect=1",
+      "note": "桌面被控端。点下载由信令签发短时链接。"
+    },
+    {
+      "id": "windows",
+      "label": "Windows",
+      "kind": "file",
+      "href": "/api/downloads/windows?redirect=1",
+      "note": "桌面被控端。点下载由信令签发短时链接。"
+    },
+    {
+      "id": "android",
+      "label": "安卓",
+      "kind": "file",
+      "href": "/api/downloads/android?redirect=1",
+      "note": "被控端 APK。点下载由信令签发短时链接。"
+    }
+  ]
+}

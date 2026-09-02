@@ -6,6 +6,8 @@
 
 信令上机：`./scripts/publish-server.sh`（拷到 VPS `/opt/remotedesk/`，再重启 `remotedesk`）。
 
+产品页（介绍 + 各平台入口）：`./tools/publish-page.sh`，读 `platforms/web/product.json`（协议见 `loessx-vps/PRODUCT-PROTOCOL.md`）。slug 是 `chenai`，因为 `/remote/` 是网页控制台。安装包 URL 只写在这份 JSON 里，不要写回官网首页。
+
 ## 目录结构
 
 | 目录 | 内容 |
@@ -16,7 +18,9 @@
 | `tests/` | pytest |
 | `client/` `server/` | 最初的 Tasks 起步应用（验证开发环境，不是产品） |
 | `Dockerfile` `docker-compose.yml` | 信令容器化 |
+| `platforms/web/` | 产品页与 `product.json`（公网 `/chenai/`） |
 | `scripts/publish-server.sh` | 把 `src/remote/` 发到 VPS |
+| `tools/publish-page.sh` | 把产品页交给 loessx-vps |
 
 ---
 

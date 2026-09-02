@@ -8,5 +8,6 @@ alwaysApply: true
 只改尘埃（信令、桌面、Android、OSS 上传）。官网、nginx、机器路径以同级 **`../loessx-vps/CONVENTIONS.md`** 为准，发版前打开那份。
 
 - 不要在本仓库加回 `site/`。
-- 信令上机用 `./scripts/publish-server.sh`，不要整树删除 `/opt/remotedesk`。
+- 产品介绍和平台列表只改 `platforms/web/product.json`（slug `chenai`，`loessx-product/1`），上机用 `./tools/publish-page.sh`。解析用官网 `/assets/js/loessx-product.js`。
+- 信令上机用 `./scripts/publish-server.sh`，不要整树删除 `/opt/remotedesk`。`/remote/` 是控制台，不是产品页。
 - 强制更新顺序见 `desktop-publish`；Windows 直传见 `windows-oss-upload`。
