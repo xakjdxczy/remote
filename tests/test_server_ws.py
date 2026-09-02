@@ -143,7 +143,7 @@ def test_android_download_json_and_redirect(monkeypatch):
     assert bounced.headers["location"] == "https://bucket.example/app.apk?sig=1"
 
 
-def test_desktop_download_json_and_unknown_kind(monkeypatch):
+def test_desktop_download_json_and_unknown_kind(monkeypatch, tmp_path):
     monkeypatch.setattr(server_mod, "registry", Registry())
 
     def fake_payload(kind):
@@ -155,6 +155,7 @@ def test_desktop_download_json_and_unknown_kind(monkeypatch):
         }
 
     monkeypatch.setattr(server_mod.oss, "download_payload", fake_payload)
+    monkeypatch.setenv("DUSTX_DATA_DIR", str(tmp_path))
     client = TestClient(create_app())
     mac = client.get("/api/downloads/macos")
     assert mac.status_code == 200
@@ -163,6 +164,117 @@ def test_desktop_download_json_and_unknown_kind(monkeypatch):
     assert win.status_code == 302
     assert win.headers["location"].endswith("windows.zip?sig=1")
     assert client.get("/api/downloads/nope").status_code == 404
+
+
+def test_download_click_counts_post_and_redirect(monkeypatch, tmp_path):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    monkeypatch.setenv("DUSTX_DATA_DIR", str(tmp_path))
+
+    def fake_payload(kind):
+        return {"ok": True, "url": f"https://bucket.example/{kind}.zip", "filename": f"{kind}.zip"}
+
+    monkeypatch.setattr(server_mod.oss, "download_payload", fake_payload)
+    client = TestClient(create_app())
+    from remote.server import download_stats
+
+    assert client.get("/api/downloads/macos").status_code == 200
+    assert download_stats.counts()["macos"] == 0
+    assert client.post("/api/downloads/macos").status_code == 200
+    assert download_stats.counts()["macos"] == 1
+    bounced = client.get("/api/downloads/windows?redirect=1", follow_redirects=False)
+    assert bounced.status_code == 302
+    assert download_stats.counts()["windows"] == 1
+    assert download_stats.counts()["android"] == 0
+
+
+def test_download_daily_quota_returns_busy(monkeypatch, tmp_path):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    monkeypatch.setenv("DUSTX_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DUSTX_DOWNLOAD_DAILY_BYTES", "100")
+
+    def fake_payload(kind):
+        return {
+            "ok": True,
+            "url": f"https://bucket.example/{kind}.zip",
+            "filename": f"{kind}.zip",
+            "size": 100,
+        }
+
+    monkeypatch.setattr(server_mod.oss, "download_payload", fake_payload)
+    client = TestClient(create_app())
+    from remote.server import download_stats
+
+    first = client.post("/api/downloads/macos")
+    assert first.status_code == 200
+    second = client.post("/api/downloads/macos")
+    assert second.status_code == 503
+    body = second.json()
+    assert body["busy"] is True
+    assert "繁忙" in body["message"]
+    assert download_stats.counts()["macos"] == 1
+
+
+def test_hosted_download_quota_counts_other_software(monkeypatch, tmp_path):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    monkeypatch.setenv("DUSTX_DATA_DIR", str(tmp_path))
+    www = tmp_path / "www"
+    apk = www / "board" / "android" / "boardime.apk"
+    apk.parent.mkdir(parents=True)
+    apk.write_bytes(b"apk-bytes-here")
+    monkeypatch.setenv("DUSTX_WWW_ROOT", str(www))
+    client = TestClient(create_app())
+    from remote.server import download_stats
+
+    denied = client.get("/api/download-quota")
+    assert denied.status_code == 404
+    headers = {
+        "X-Quota-Internal": "1",
+        "X-Original-URI": "/board/android/boardime.apk",
+    }
+    ok = client.get("/api/download-quota", headers=headers)
+    assert ok.status_code == 204
+    assert download_stats.counts()["hosted"] == 1
+    missing = client.get(
+        "/api/download-quota",
+        headers={"X-Quota-Internal": "1", "X-Original-URI": "/board/android/missing.apk"},
+    )
+    assert missing.status_code == 204
+    assert download_stats.counts()["hosted"] == 1
+
+
+def test_hosted_download_quota_shares_daily_cap(monkeypatch, tmp_path):
+    monkeypatch.setattr(server_mod, "registry", Registry())
+    monkeypatch.setenv("DUSTX_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DUSTX_DOWNLOAD_DAILY_BYTES", "10")
+    www = tmp_path / "www"
+    apk = www / "board" / "android" / "boardime.apk"
+    apk.parent.mkdir(parents=True)
+    apk.write_bytes(b"apk-bytes-here")
+    monkeypatch.setenv("DUSTX_WWW_ROOT", str(www))
+
+    def fake_payload(kind):
+        return {
+            "ok": True,
+            "url": f"https://bucket.example/{kind}.zip",
+            "filename": f"{kind}.zip",
+            "size": 10,
+        }
+
+    monkeypatch.setattr(server_mod.oss, "download_payload", fake_payload)
+    client = TestClient(create_app())
+    from remote.server import download_stats
+
+    assert client.post("/api/downloads/macos").status_code == 200
+    busy = client.get(
+        "/api/download-quota",
+        headers={
+            "X-Quota-Internal": "1",
+            "X-Original-URI": "/board/android/boardime.apk",
+        },
+    )
+    assert busy.status_code == 403
+    assert busy.json()["busy"] is True
+    assert download_stats.counts()["hosted"] == 0
 
 
 def test_android_download_unavailable(monkeypatch):

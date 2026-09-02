@@ -22,7 +22,7 @@ from remote.device_info import sanitize_info
 from remote.ids import constant_time_equals, format_device_id, is_usable_temp_password, normalize_device_id
 from remote.p2p import SIGNAL_KINDS, ice_servers_payload
 from remote.protocol import decode_json, encode_json
-from remote.server import camlink, oss
+from remote.server import camlink, download_stats, oss
 from remote.server.device_db import attach_device_db
 from remote.server.id_store import attach_store
 from remote.server.registry import Registry, is_mesh_label
@@ -304,13 +304,11 @@ def create_app() -> FastAPI:
 
     @app.get("/api/downloads/{kind}")
     async def official_download(kind: str, redirect: int = 0) -> Any:
-        """Issue a short-lived OSS download URL for an official package.
-
-        Official-site JS fetches this as JSON, then the browser downloads from
-        OSS. ``?redirect=1`` 302s for no-JS / direct links.
-        """
+        """Metadata JSON does not count. ``?redirect=1`` and POST count as a click."""
         if kind not in oss.DOWNLOAD_KINDS:
             raise HTTPException(status_code=404, detail="unknown download")
+        if redirect and download_stats.quota_full():
+            raise HTTPException(status_code=503, detail=download_stats.BUSY_MESSAGE)
         try:
             payload = await asyncio.to_thread(oss.download_payload, kind)
         except oss.OssError as exc:
@@ -320,8 +318,43 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=status, detail=message) from exc
             return JSONResponse({"ok": False, "message": message}, status_code=status)
         if redirect:
+            download_stats.record_click(kind, int(payload.get("size") or 0))
             return RedirectResponse(payload["url"], status_code=302)
         return payload
+
+    @app.post("/api/downloads/{kind}")
+    async def official_download_click(kind: str) -> Any:
+        if kind not in oss.DOWNLOAD_KINDS:
+            raise HTTPException(status_code=404, detail="unknown download")
+        if download_stats.quota_full():
+            return JSONResponse(
+                {"ok": False, "busy": True, "message": download_stats.BUSY_MESSAGE},
+                status_code=503,
+            )
+        try:
+            payload = await asyncio.to_thread(oss.download_payload, kind)
+        except oss.OssError as exc:
+            message = str(exc)
+            status = 503 if "not configured" in message else 404
+            return JSONResponse({"ok": False, "message": message}, status_code=status)
+        download_stats.record_click(kind, int(payload.get("size") or 0))
+        return payload
+
+    @app.get("/api/download-quota")
+    async def hosted_download_quota(request: Request) -> Response:
+        """nginx auth_request hook for /board and /study binaries. 2xx allow, 403 busy."""
+        if request.headers.get("x-quota-internal") != "1":
+            raise HTTPException(status_code=404)
+        uri = request.headers.get("x-original-uri") or ""
+        path = download_stats.hosted_file(uri)
+        if download_stats.quota_full():
+            return JSONResponse(
+                {"ok": False, "busy": True, "message": download_stats.BUSY_MESSAGE},
+                status_code=403,
+            )
+        if path is not None:
+            download_stats.record_click("hosted", path.stat().st_size)
+        return Response(status_code=204)
 
     @app.get("/api/update")
     async def official_update(platform: str = "", current: str = "") -> dict[str, Any]:
@@ -341,12 +374,15 @@ def create_app() -> FastAPI:
             kind = "macos"
         if kind not in {"macos", "windows"}:
             raise HTTPException(status_code=400, detail="platform required")
+        if download_stats.quota_full():
+            raise HTTPException(status_code=503, detail=download_stats.BUSY_MESSAGE)
         try:
             body, filename, content_type = await asyncio.to_thread(oss.package_file, kind)
         except oss.OssError as exc:
             message = str(exc)
             status = 503 if "not configured" in message else 404
             raise HTTPException(status_code=status, detail=message) from exc
+        download_stats.record_click(kind, len(body))
         return Response(
             content=body,
             media_type=content_type,

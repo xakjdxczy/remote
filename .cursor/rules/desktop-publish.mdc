@@ -1,0 +1,18 @@
+---
+description: Desktop pack/publish order — Windows first, force-update last
+alwaysApply: true
+---
+
+# 桌面打包发布顺序
+
+强制更新之前，**两端官方包都必须已经上传并 GET 校验通过**。
+
+顺序固定，中途 Windows 互访随时会断：
+
+1. **先 Windows**：编 Release → `tar.exe` 打 `DustX-windows.zip` → `upload-download windows --from-ssh …`，sha256/size/version 一致。
+2. **再 macOS**：编 `尘埃X.app` → `upload-download macos …`，同样三项校验。
+3. **最后**才在 VPS 上 `force-update --on --version <同一版本>`。
+
+不要先传 Mac、不要先开强制更新。Windows 一断就没法再打包；强制更新已开或只上了 Mac，Windows 会停在旧包。
+
+Windows 直传细节见 `windows-oss-upload` 规则。
