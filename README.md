@@ -2,7 +2,7 @@
 
 本仓库只做远程软件**尘埃**：信令、网页控制端、桌面被控端、Android 被控端。
 
-官网（黄土坡、字母陨石）在同级仓库 [`loessx-vps`](https://github.com/xakjdxczy/loessx-vps)，发到 `/var/www/chenaix`。本仓库不要再加 `site/`。
+官网（黄土坡、字母陨石）在同级仓库 [`loessx-vps`](https://github.com/xakjdxczy/loessx-vps)。VPS 目录和上机规则以那边的 `CONVENTIONS.md` 为准。本仓库不要再加 `site/`。
 
 信令上机：`./scripts/publish-server.sh`（拷到 VPS `/opt/remotedesk/`，再重启 `remotedesk`）。
 

@@ -5,7 +5,7 @@ alwaysApply: true
 
 # remote 仓库范围
 
-只改尘埃（信令、桌面、Android、OSS 上传）。官网、nginx、`/var/www/chenaix` 在同级 `loessx-vps`。
+只改尘埃（信令、桌面、Android、OSS 上传）。官网、nginx、机器路径以同级 **`../loessx-vps/CONVENTIONS.md`** 为准，发版前打开那份。
 
 - 不要在本仓库加回 `site/`。
 - 信令上机用 `./scripts/publish-server.sh`，不要整树删除 `/opt/remotedesk`。

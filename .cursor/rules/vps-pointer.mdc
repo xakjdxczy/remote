@@ -1,0 +1,12 @@
+---
+description: 上机和机器路径以同级 loessx-vps 为准
+alwaysApply: true
+---
+
+# 黄土坡 VPS 指针
+
+VPS 规则不在本仓库。同级目录必须有 `loessx-vps`。
+
+上机、nginx、`/var/www`、`/opt/remotedesk` 以 **`../loessx-vps/CONVENTIONS.md`** 为准。改路径或发版前先打开那份文件。不要自己发明机器目录，不要在本仓库里写 `ssh dustx-vps` 散落命令（薄封装去调 `../loessx-vps/scripts/` 可以）。
+
+新开产品：先在 `CONVENTIONS.md` 表格加一行并改 nginx，再拷这个指针规则进新仓库（`loessx-vps/scripts/init-product-repo.sh`）。
